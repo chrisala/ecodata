@@ -1,10 +1,6 @@
 package au.org.ala.ecodata
 
-import au.org.ala.ecodata.Score
 import au.org.ala.ecodata.reporting.*
-import org.elasticsearch.action.search.SearchResponse
-import org.elasticsearch.search.SearchHit
-import org.grails.plugins.csv.CSVReaderUtils
 
 import static au.org.ala.ecodata.ElasticIndex.HOMEPAGE_INDEX
 

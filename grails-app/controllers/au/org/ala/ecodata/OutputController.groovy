@@ -2,8 +2,6 @@ package au.org.ala.ecodata
 
 import grails.converters.JSON
 
-import static au.org.ala.ecodata.Status.DELETED
-
 class OutputController {
 
     def outputService, commonService

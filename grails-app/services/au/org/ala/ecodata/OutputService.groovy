@@ -2,7 +2,6 @@ package au.org.ala.ecodata
 import au.org.ala.ecodata.converter.RecordConverter
 import au.org.ala.ecodata.metadata.OutputMetadata
 
-import static au.org.ala.ecodata.Status.ACTIVE
 import static au.org.ala.ecodata.Status.DELETED
 
 class OutputService {
