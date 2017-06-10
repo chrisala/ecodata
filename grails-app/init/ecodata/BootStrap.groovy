@@ -2,13 +2,11 @@ import au.org.ala.ecodata.AccessLevel
 import au.org.ala.ecodata.AuditEventType
 import au.org.ala.ecodata.GormEventListener
 import grails.converters.JSON
-import net.sf.json.JSONNull
 import org.bson.BSON
 import org.bson.Transformer
 import org.bson.types.ObjectId
-import org.codehaus.groovy.grails.commons.ApplicationAttributes
-import org.codehaus.groovy.grails.web.json.JSONObject
 import org.grails.datastore.mapping.core.Datastore
+import org.grails.web.json.JSONObject
 
 import javax.imageio.ImageIO
 
@@ -67,19 +65,6 @@ class BootStrap {
         }
 
         JSON.registerObjectMarshaller(JSONNull, {return ""})
-
-        //Add a default project for individual sightings (unless disabled)
-        def individualSightingsProject = au.org.ala.ecodata.Project.findByProjectId(grailsApplication.config.records.default.projectId)
-        if(!individualSightingsProject){
-            log.info "Creating individual sightings project"
-            def project = new au.org.ala.ecodata.Project(
-                    name: "Individual sightings",
-                    projectId: grailsApplication.config.records.default.projectId,
-                    dataResourceId: grailsApplication.config.records.default.dataResourceId,
-                    isCitizenScience: true
-            )
-            project.save(flush: true)
-        }
 
         ImageIO.scanForPlugins()
     }

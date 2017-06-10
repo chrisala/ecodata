@@ -1,7 +1,7 @@
 package au.org.ala.ecodata
 
-import net.sf.json.JSONException
-import org.codehaus.groovy.grails.web.json.JSONObject
+import org.grails.web.json.JSONException
+import org.grails.web.json.JSONObject
 
 
 /**

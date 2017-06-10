@@ -1,18 +1,9 @@
 package au.org.ala.ecodata.metadata
 
-import au.org.ala.ecodata.Activity
-import au.org.ala.ecodata.CommonService
-import au.org.ala.ecodata.MetadataService
-import au.org.ala.ecodata.Output
-import au.org.ala.ecodata.OutputService
-import au.org.ala.ecodata.Project
-import au.org.ala.ecodata.ProjectActivity
-import au.org.ala.ecodata.Record
-import au.org.ala.ecodata.RecordService
-import au.org.ala.ecodata.Site
+import au.org.ala.ecodata.*
 import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
-import net.sf.json.groovy.JsonSlurper
+import groovy.json.JsonSlurper
 import spock.lang.Specification
 
 @TestFor(OutputService)

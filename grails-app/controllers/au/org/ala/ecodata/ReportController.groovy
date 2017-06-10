@@ -1,7 +1,6 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.json.JSONObject
 
 
 class ReportController {

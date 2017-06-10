@@ -1,6 +1,6 @@
 package au.org.ala.ecodata.converter
 
-import net.sf.json.groovy.JsonSlurper
+import groovy.json.JsonSlurper
 import spock.lang.Specification
 
 class GenericConverterSpec extends Specification {

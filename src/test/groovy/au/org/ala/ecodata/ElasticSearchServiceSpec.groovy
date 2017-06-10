@@ -1,7 +1,7 @@
 package au.org.ala.ecodata
 
 import grails.test.mixin.TestFor
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
+import grails.web.servlet.mvc.GrailsParameterMap
 import spock.lang.Specification
 
 import javax.servlet.http.HttpServletRequest

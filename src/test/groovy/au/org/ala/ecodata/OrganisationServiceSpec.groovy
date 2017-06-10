@@ -1,16 +1,13 @@
 package au.org.ala.ecodata
 
 import com.github.fakemongo.Fongo
-import grails.test.mixin.TestMixin
-import grails.test.mixin.mongodb.MongoDbTestMixin
-import spock.lang.Specification
+import grails.test.mongodb.MongoSpec
 
 /**
  * See the API for {@link grails.test.mixin.services.ServiceUnitTestMixin} for usage instructions
  */
 
-@TestMixin(MongoDbTestMixin)
-class OrganisationServiceSpec extends Specification {
+class OrganisationServiceSpec extends MongoSpec {
 
     OrganisationService service = new OrganisationService()
     def stubbedCollectoryService = Stub(CollectoryService)

@@ -2,18 +2,16 @@ package au.org.ala.ecodata
 
 import com.mongodb.BasicDBObject
 import grails.converters.JSON
-import grails.test.mixin.TestMixin
-import grails.test.mixin.mongodb.MongoDbTestMixin
-import org.codehaus.groovy.grails.web.converters.marshaller.json.CollectionMarshaller
-import org.codehaus.groovy.grails.web.converters.marshaller.json.MapMarshaller
-import spock.lang.Specification
+import grails.test.mongodb.MongoSpec
+import org.grails.web.converters.marshaller.json.CollectionMarshaller
+import org.grails.web.converters.marshaller.json.MapMarshaller
+
 
 /**
  * Specification / tests for the SiteService
  */
 
-@TestMixin(MongoDbTestMixin)
-class SiteServiceSpec extends Specification {
+class SiteServiceSpec extends MongoSpec {
 
     def service = new SiteService()
     def webServiceMock = Mock(WebService)

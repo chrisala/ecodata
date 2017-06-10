@@ -1,3 +1,5 @@
+package au.org.ala.ecodata
+
 class UrlMappings {
 
 	static mappings = {

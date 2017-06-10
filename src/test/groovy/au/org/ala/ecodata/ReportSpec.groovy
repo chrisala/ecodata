@@ -1,17 +1,13 @@
 package au.org.ala.ecodata
 
 import com.mongodb.BasicDBObject
-import grails.test.mixin.TestMixin
-import grails.test.mixin.gorm.Domain
-import grails.test.mixin.mongodb.MongoDbTestMixin
-import spock.lang.Specification
+import grails.test.mongodb.MongoSpec
 
 /**
  * See the API for {@link grails.test.mixin.domain.DomainClassUnitTestMixin} for usage instructions
  */
-@TestMixin(MongoDbTestMixin)
-@Domain(Report)
-class ReportSpec extends Specification {
+
+class ReportSpec extends MongoSpec {
 
     def setup() {
         Report.collection.remove(new BasicDBObject())

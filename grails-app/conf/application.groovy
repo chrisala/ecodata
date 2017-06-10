@@ -571,8 +571,8 @@ if (!security.cas.bypass) {
 if (!security.cas.adminRole) {
     security.cas.adminRole = "ROLE_ADMIN"
 }
-if (!ecodata.use.uuids) {
-    ecodata.use.uuids = false
+if (!au.org.ala.ecodata.use.uuids) {
+    au.org.ala.ecodata.use.uuids = false
 }
 if (!userDetailsSingleUrl) {
     userDetailsSingleUrl = "https://auth.ala.org.au/userdetails/userDetails/getUserDetails"
@@ -633,7 +633,7 @@ security {
 environments {
     development {
         grails.logging.jul.usebridge = true
-        ecodata.use.uuids = false
+        au.org.ala.ecodata.use.uuids = false
         app.external.model.dir = "/data/ecodata/models/"
         grails.hostname = "devt.ala.org.au"
         app.elasticsearch.indexAllOnStartup = false
@@ -647,7 +647,7 @@ environments {
             }
         }
         grails.logging.jul.usebridge = true
-        ecodata.use.uuids = false
+        au.org.ala.ecodata.use.uuids = false
         app.external.model.dir = "./models/"
         grails.hostname = "devt.ala.org.au"
         // Only for travis CI, they must be overriden by ecodata-config.properties

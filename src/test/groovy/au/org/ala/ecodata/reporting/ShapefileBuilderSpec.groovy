@@ -4,12 +4,11 @@ import au.org.ala.ecodata.ProjectService
 import au.org.ala.ecodata.SiteService
 import com.vividsolutions.jts.geom.Coordinate
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.converters.marshaller.json.CollectionMarshaller
-import org.codehaus.groovy.grails.web.converters.marshaller.json.MapMarshaller
 import org.geotools.data.DataStore
 import org.geotools.data.DataStoreFinder
 import org.geotools.data.FeatureSource
-
+import org.grails.web.converters.marshaller.json.CollectionMarshaller
+import org.grails.web.converters.marshaller.json.MapMarshaller
 import org.opengis.feature.Feature
 import org.opengis.feature.GeometryAttribute
 import spock.lang.Specification

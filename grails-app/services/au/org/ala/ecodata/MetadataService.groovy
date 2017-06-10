@@ -4,17 +4,15 @@ import au.org.ala.ecodata.metadata.OutputMetadata
 import au.org.ala.ecodata.metadata.ProgramsModel
 import au.org.ala.ecodata.reporting.XlsExporter
 import grails.converters.JSON
+import grails.plugins.csv.CSVMapReader
 import grails.validation.ValidationException
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import org.apache.poi.ss.util.CellReference
-import org.grails.plugins.csv.CSVMapReader
 
 import java.text.SimpleDateFormat
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipEntry
-
-import static au.org.ala.ecodata.Status.*
+import java.util.zip.ZipInputStream
 
 class MetadataService {
 
@@ -51,7 +49,7 @@ class MetadataService {
         }
 
         // Remove deprecated activities
-        activities = activities.findAll {!it.status || it.status == ACTIVE}
+        activities = activities.findAll {!it.status || it.status == Status.ACTIVE}
 
         Map byCategory = [:]
 
@@ -637,7 +635,7 @@ class MetadataService {
                 if (destroy) {
                     score.delete()
                 } else {
-                    score.status = DELETED
+                    score.status = Status.DELETED
                     score.save(flush: true, failOnError: true)
                 }
                 return [status: 'ok']

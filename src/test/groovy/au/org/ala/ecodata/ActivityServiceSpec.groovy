@@ -1,10 +1,6 @@
 package au.org.ala.ecodata
 
-import grails.test.mixin.*
-import grails.test.mixin.gorm.Domain
-import grails.test.mixin.mongodb.MongoDbTestMixin
-import org.codehaus.groovy.grails.commons.ServiceArtefactHandler
-import spock.lang.Specification
+import grails.test.mongodb.MongoSpec
 import spock.lang.Unroll
 
 import java.text.DateFormat
@@ -18,9 +14,7 @@ import java.text.SimpleDateFormat
  * the service due to transactions being cleaned up after the first test execution - need to figure that out
  * at some point).
  */
-@TestMixin(MongoDbTestMixin)
-@Domain(Activity)
-class ActivityServiceSpec extends Specification {
+class ActivityServiceSpec extends MongoSpec {
 
     ActivityService service
 

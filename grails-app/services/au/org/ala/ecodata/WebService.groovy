@@ -16,8 +16,8 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.converters.exceptions.ConverterException
-import org.codehaus.groovy.grails.web.servlet.HttpHeaders
+import grails.web.http.HttpHeaders
+import org.grails.web.converters.exceptions.ConverterException
 import org.springframework.http.MediaType
 
 import javax.servlet.http.HttpServletResponse

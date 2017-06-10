@@ -1,24 +1,25 @@
 package au.org.ala.ecodata
 
+import grails.converters.JSON
+import grails.core.GrailsApplication
+import groovy.json.JsonSlurper
+
+import org.apache.commons.codec.binary.Base64
 import org.apache.http.HttpStatus
+import org.springframework.web.multipart.MultipartFile
+import org.springframework.web.multipart.MultipartHttpServletRequest
 
 import java.text.SimpleDateFormat
 
 import static au.org.ala.ecodata.Status.*
 import static javax.servlet.http.HttpServletResponse.*
 
-import grails.converters.JSON
-import groovy.json.JsonSlurper
-import org.apache.commons.codec.binary.Base64
-import org.springframework.web.multipart.MultipartFile
-import org.springframework.web.multipart.MultipartHttpServletRequest
-
 /**
  * Controller for record CRUD operations with support for handling images.
  */
 class RecordController {
 
-    def grailsApplication
+    GrailsApplication grailsApplication
 
     RecordService recordService
     UserService userService

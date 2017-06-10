@@ -1,10 +1,8 @@
 package au.org.ala.ecodata
-import grails.converters.JSON
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
-import org.elasticsearch.action.search.SearchResponse
 
-import static au.org.ala.ecodata.ElasticIndex.PROJECT_ACTIVITY_INDEX
-import static au.org.ala.ecodata.Status.ACTIVE
+import grails.converters.JSON
+import grails.web.servlet.mvc.GrailsParameterMap
+import org.elasticsearch.action.search.SearchResponse
 
 class DocumentController {
 
@@ -251,7 +249,7 @@ class DocumentController {
             all?.each {
                 if (!found.contains(it.entityId)) {
                     found << it.entityId
-                    if (it.entity.status == ACTIVE && Document.DOCUMENT_TYPE_IMAGE == it.entity.type &&
+                    if (it.entity.status == Status.ACTIVE && Document.DOCUMENT_TYPE_IMAGE == it.entity.type &&
                             (it.eventType == AuditEventType.Insert || it.eventType == AuditEventType.Update)) {
                         images << it.entity
                     }
@@ -275,7 +273,7 @@ class DocumentController {
         Map searchResults, activityMetadata = [:]
         Map documentResult
         elasticSearchService.buildProjectActivityQuery(params)
-        SearchResponse results = elasticSearchService.search(params.query, params, PROJECT_ACTIVITY_INDEX);
+        SearchResponse results = elasticSearchService.search(params.query, params, ElasticIndex.PROJECT_ACTIVITY_INDEX);
         activityIds = results?.hits?.hits?.collect { document ->
             document.source.activityId
         }

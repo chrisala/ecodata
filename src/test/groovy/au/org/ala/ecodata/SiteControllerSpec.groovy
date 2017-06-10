@@ -3,7 +3,7 @@ import com.mongodb.MongoExecutionTimeoutException
 import grails.test.mixin.TestFor
 import grails.test.mixin.TestMixin
 import grails.test.mixin.support.GrailsUnitTestMixin
-import org.apache.commons.httpclient.HttpStatus
+import org.apache.http.HttpStatus
 import spock.lang.Specification
 /**
  * See the API for {@link grails.test.mixin.support.GrailsUnitTestMixin} for usage instructions

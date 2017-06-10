@@ -21,7 +21,7 @@ class ReportServiceSpec extends Specification {
 
 
     def setupSpec() {
-        Output.metaClass.static.withNewSession = {Closure c -> c.call() }
+        Output.metaClass.static.withNewSession = { Closure c -> c.call() }
     }
 
     def setup() {
@@ -49,7 +49,7 @@ class ReportServiceSpec extends Specification {
 
         elasticSearchService.search(_, _, _) >> [hits:[totalHits:projectDocs.size(), hits:projectDocs]]
 
-        Output.metaClass.static.findAllByActivityIdInListAndStatusNotEqual = {activityIds, status -> activityIds.collect{outputData[it]}.flatten().findAll()}
+        Output.metaClass.static.findAllByActivityIdInListAndStatusNotEqual = { activityIds, status -> activityIds.collect{outputData[it]}.flatten().findAll()}
     }
 
     def "the sum of a single property can be reported"() {

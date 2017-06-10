@@ -1,11 +1,12 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
+import grails.core.GrailsApplication
 
 @PreAuthorise(basicAuth = false)
 class DocumentationController {
 
-    def grailsApplication
+    GrailsApplication grailsApplication
     def metadataService
 
     def index() {

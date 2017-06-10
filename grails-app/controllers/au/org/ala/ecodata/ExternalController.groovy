@@ -4,6 +4,8 @@ import com.github.fge.jsonschema.main.JsonSchema
 import com.github.fge.jsonschema.main.JsonSchemaFactory
 import com.github.fge.jsonschema.report.ProcessingReport
 import grails.converters.JSON
+import grails.core.GrailsApplication
+
 /**
  *  Provides a single interface for external (as in not other ALA apps) web service clients.
  *  Not really sure if this is a good idea or should instead just be incorporated into the other clients via a filter
@@ -14,7 +16,8 @@ import grails.converters.JSON
  */
 class ExternalController {
 
-    def grailsApplication, projectService, activityService, metadataService, cacheService
+    GrailsApplication grailsApplication
+    def projectService, activityService, metadataService, cacheService
 
     /** Temporary IP based security */
     def beforeInterceptor = [action:this.&applyWhiteList]
