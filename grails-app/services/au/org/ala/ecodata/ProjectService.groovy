@@ -131,7 +131,7 @@ class ProjectService {
     Map toMap(project, levelOfDetail = [], includeDeletedActivities = false, version = null) {
         Map result
 
-        Map mapOfProperties = project instanceof Project ? project.getProperty("dbo").toMap() : project
+        Map mapOfProperties = project instanceof Project ? project.getProperty("dbo") : project
 
         if (levelOfDetail == BASIC) {
             result = [

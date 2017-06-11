@@ -143,7 +143,8 @@ class OrganisationService {
 
     def toMap(Organisation org, levelOfDetail = []) {
         def dbo = org.dbo
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = [:]
+        mapOfProperties.putAll(dbo)
 
         if ('projects' in levelOfDetail) {
             mapOfProperties.projects = []

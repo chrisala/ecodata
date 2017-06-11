@@ -764,7 +764,7 @@ log4j = {
 environments {
     development {
         grails {
-            mongo {
+            mongodb {
                 host = "localhost"
                 port = "27017"
                 databaseName = "ecodata"
@@ -773,7 +773,7 @@ environments {
     }
     test {
         grails {
-            mongo {
+            mongodb {
                 host = "localhost"
                 port = "27017"
                 databaseName = "ecodata-test"
@@ -782,7 +782,7 @@ environments {
     }
     production {
         grails {
-            mongo {
+            mongodb {
                 host = "localhost"
                 port = "27017"
                 databaseName = "ecodata"
