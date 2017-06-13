@@ -6,10 +6,14 @@ import au.org.ala.ecodata.GormEventListener
 import grails.converters.JSON
 import grails.core.ApplicationAttributes
 import org.bson.BSON
+import org.bson.BsonNull
+import org.bson.BsonUndefined
 import org.bson.Transformer
 import org.bson.types.ObjectId
+import org.grails.datastore.bson.codecs.CodecExtensions
 import org.grails.datastore.mapping.core.Datastore
 import org.grails.web.json.JSONObject
+import org.springframework.core.convert.converter.Converter
 
 import javax.imageio.ImageIO
 
@@ -68,6 +72,13 @@ class BootStrap {
         }
 
         //JSON.registerObjectMarshaller(JSONNull, {return ""})
+
+        CodecExtensions.BSON_VALUE_CONVERTERS[BsonUndefined] << new Converter<BsonUndefined, Object>() {
+            @Override
+            Object convert(BsonUndefined source) {
+                return null
+            }
+        }
 
         ImageIO.scanForPlugins()
     }

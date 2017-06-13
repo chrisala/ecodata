@@ -66,9 +66,9 @@ class Report {
     /** The user ID of the grant manager who returned this Report */
     String returnedBy
     /** Number of days before (-ve) or after the due date the report was submitted.  Calculated at submit time to make reporting easier. */
-    Integer submissionDeltaInWeekdays
+    Number submissionDeltaInWeekdays
     /** Number of days after a report is submitted that it's approved.  Calculated at approval time to make reporting easier. */
-    Integer approvalDeltaInWeekdays
+    Number approvalDeltaInWeekdays
 
     /** REPORT_NOT_APPROVED, REPORT_SUBMITTED, REPORT_APPROVED */
     String publicationStatus = REPORT_NOT_APPROVED

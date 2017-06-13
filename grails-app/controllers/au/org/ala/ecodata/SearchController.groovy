@@ -7,6 +7,7 @@ import au.org.ala.ecodata.reporting.XlsExporter
 import grails.converters.JSON
 import grails.web.servlet.mvc.GrailsParameterMap
 import groovy.json.JsonSlurper
+import org.apache.http.entity.ContentType
 import org.elasticsearch.action.search.SearchResponse
 import org.elasticsearch.search.SearchHit
 
@@ -352,7 +353,7 @@ class SearchController {
             String extension = params.fileExtension ?: 'zip'
             File file = new File("${grailsApplication.config.temp.dir}${File.separator}${params.id}.${extension}")
             if (file) {
-                response.setContentType(ContentType.BINARY.toString())
+                response.setContentType(ContentType.DEFAULT_BINARY.toString())
                 response.setHeader('Content-Disposition', 'Attachment;Filename="data.'+extension+'"')
 
                 file.withInputStream { i -> response.outputStream << i }
@@ -380,7 +381,7 @@ class SearchController {
                     render "OK"
                 }
             } else {
-                response.setContentType(ContentType.BINARY.toString())
+                response.setContentType(ContentType.DEFAULT_BINARY.toString())
                 response.setHeader('Content-Disposition', 'Attachment;Filename="data.zip"')
 
                 downloadService.downloadProjectData(response.outputStream, params)
