@@ -1,3 +1,5 @@
+package au.org.ala.ecodata
+
 import au.org.ala.ecodata.AccessLevel
 import au.org.ala.ecodata.AuditEventType
 import au.org.ala.ecodata.GormEventListener
