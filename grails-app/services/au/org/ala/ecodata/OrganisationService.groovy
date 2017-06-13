@@ -175,7 +175,7 @@ class OrganisationService {
         DBCursor results = collection.find(siteQuery).batchSize(100)
 
         results.each { dbObject ->
-            action.call(dbObject.toMap())
+            action.call(dbObject)
         }
     }
 

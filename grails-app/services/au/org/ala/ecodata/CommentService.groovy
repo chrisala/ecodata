@@ -19,7 +19,7 @@ class CommentService {
      */
     Map getPropertiesOfDomainObject(Comment it) {
         BSONObject dbo = it.getProperty("dbo")
-        Map mapOfProperties = dbo.toMap()
+        Map mapOfProperties = dbo
         mapOfProperties.id = mapOfProperties._id
         mapOfProperties.remove("_id")
         mapOfProperties

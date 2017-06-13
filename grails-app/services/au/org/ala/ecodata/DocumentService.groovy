@@ -38,7 +38,7 @@ class DocumentService {
      * @return map of properties
      */
     def toMap(document, levelOfDetail = []) {
-        def mapOfProperties = document instanceof Document ? document.getProperty("dbo").toMap() : document
+        def mapOfProperties = document instanceof Document ? document.getProperty("dbo") : document
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")

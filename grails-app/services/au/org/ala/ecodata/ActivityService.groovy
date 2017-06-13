@@ -191,7 +191,7 @@ class ActivityService {
      * @return map of properties
      */
     def toMap(act, levelOfDetail = ['all'], version = null) {
-        def mapOfProperties = act instanceof Activity ? act.getProperty("dbo").toMap() : act
+        def mapOfProperties = act instanceof Activity ? act.getProperty("dbo") : act
         mapOfProperties.complete = act.complete // This is not a persistent property so is not in the dbo.
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
@@ -432,7 +432,7 @@ class ActivityService {
      */
     def toLiteMap(act) {
         def dbo = act.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = dbo
         [activityId: mapOfProperties.activityId,
                 siteId: mapOfProperties.siteId,
                 type: mapOfProperties.type,

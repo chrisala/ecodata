@@ -190,7 +190,7 @@ class ProjectActivityService {
      */
     Map toMap(projectActivity, levelOfDetail = []) {
         Map mapOfProperties = projectActivity instanceof ProjectActivity ?
-                projectActivity.getProperty("dbo").toMap() : projectActivity
+                projectActivity.getProperty("dbo") : projectActivity
 
         if (levelOfDetail == DOCS) {
             mapOfProperties["documents"] = documentService.findAllForProjectActivityId(mapOfProperties.projectActivityId)

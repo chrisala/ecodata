@@ -31,7 +31,7 @@ class ReportingService {
 
     Map toMap(Report report, levelOfDetail = []) {
         def dbo = report.dbo
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = dbo
         mapOfProperties.findAll {k,v -> v != null}
     }
 
