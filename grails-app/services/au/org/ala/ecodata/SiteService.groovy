@@ -100,7 +100,7 @@ class SiteService {
      * @return map of properties
      */
     def toMap(site, levelOfDetail = [], version = null) {
-        def mapOfProperties = site instanceof Site ? site.getProperty("dbo").toMap() : site
+        def mapOfProperties = site instanceof Site ? site.getProperty("dbo") : site
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")

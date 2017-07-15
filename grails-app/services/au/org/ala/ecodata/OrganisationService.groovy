@@ -143,7 +143,8 @@ class OrganisationService {
 
     def toMap(Organisation org, levelOfDetail = []) {
         def dbo = org.dbo
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = [:]
+        mapOfProperties.putAll(dbo)
 
         if ('projects' in levelOfDetail) {
             mapOfProperties.projects = []
@@ -174,7 +175,7 @@ class OrganisationService {
         DBCursor results = collection.find(siteQuery).batchSize(100)
 
         results.each { dbObject ->
-            action.call(dbObject.toMap())
+            action.call(dbObject)
         }
     }
 

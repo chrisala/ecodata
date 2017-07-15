@@ -131,7 +131,7 @@ class ProjectService {
     Map toMap(project, levelOfDetail = [], includeDeletedActivities = false, version = null) {
         Map result
 
-        Map mapOfProperties = project instanceof Project ? project.getProperty("dbo").toMap() : project
+        Map mapOfProperties = project instanceof Project ? project.getProperty("dbo") : project
 
         if (levelOfDetail == BASIC) {
             result = [
@@ -222,7 +222,7 @@ class ProjectService {
      */
     def toRichMap(prj) {
         def dbo = prj.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = dbo
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties["status"] = mapOfProperties["status"]?.capitalize();

@@ -25,9 +25,11 @@ class Output {
     String name
     Date dateCreated
     Date lastUpdated
+    Map data
 
     static constraints = {
         assessmentDate nullable: true
         name nullable: true
+        data nullable: true
     }
 }

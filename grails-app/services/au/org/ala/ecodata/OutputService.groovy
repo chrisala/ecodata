@@ -104,7 +104,7 @@ class OutputService {
      * @return map of properties
      */
     def toMap(output, levelOfDetail = []) {
-        def mapOfProperties = output instanceof Output ?  output.getProperty("dbo").toMap() : output
+        def mapOfProperties = output instanceof Output ?  output.getProperty("dbo") : output
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")

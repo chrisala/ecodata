@@ -71,7 +71,8 @@ class CommonService {
      */
     def toBareMap(o) {
         def dbo = o.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = [:]
+        mapOfProperties.putAll(dbo)
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")

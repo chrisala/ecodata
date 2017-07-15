@@ -33,4 +33,8 @@ if (Environment.isDevelopmentMode() && targetDir != null) {
     }
     logger("StackTrace", ERROR, ['FULL_STACKTRACE'], false)
 }
+logger("grails.app.controllers", INFO, ["STDOUT"])
+logger("grails.app.services", INFO, ["STDOUT"])
+
+logger("au.org.ala.ecodata", DEBUG, ['STDOUT'])
 root(ERROR, ['STDOUT'])

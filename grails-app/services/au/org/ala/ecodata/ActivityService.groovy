@@ -432,7 +432,7 @@ class ActivityService {
      */
     def toLiteMap(act) {
         def dbo = act.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = dbo
         [activityId: mapOfProperties.activityId,
                 siteId: mapOfProperties.siteId,
                 type: mapOfProperties.type,
