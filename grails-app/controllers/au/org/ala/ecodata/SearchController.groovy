@@ -5,9 +5,9 @@ import au.org.ala.ecodata.reporting.ProjectXlsExporter
 import au.org.ala.ecodata.reporting.SummaryXlsExporter
 import au.org.ala.ecodata.reporting.XlsExporter
 import grails.converters.JSON
+import grails.web.servlet.mvc.GrailsParameterMap
 import groovy.json.JsonSlurper
-import groovyx.net.http.ContentType
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
+import org.apache.http.entity.ContentType
 import org.elasticsearch.action.search.SearchResponse
 import org.elasticsearch.search.SearchHit
 
@@ -381,7 +381,7 @@ class SearchController {
                     render "OK"
                 }
             } else {
-                response.setContentType(ContentType.BINARY.toString())
+                response.setContentType(ContentType.DEFAULT_BINARY.toString())
                 response.setHeader('Content-Disposition', 'Attachment;Filename="data.zip"')
 
                 downloadService.downloadProjectData(response.outputStream, params)

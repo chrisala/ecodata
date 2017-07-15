@@ -1,5 +1,8 @@
 package au.org.ala.ecodata
 
+import com.github.fakemongo.Fongo
+import com.mongodb.MongoClient
+import grails.test.mixin.TestFor
 import grails.test.mongodb.MongoSpec
 import spock.lang.Unroll
 
@@ -14,6 +17,7 @@ import java.text.SimpleDateFormat
  * the service due to transactions being cleaned up after the first test execution - need to figure that out
  * at some point).
  */
+@TestFor(ActivityService)
 class ActivityServiceSpec extends MongoSpec {
 
     ActivityService service
@@ -43,21 +47,31 @@ class ActivityServiceSpec extends MongoSpec {
             createActivity(props)
         }
 
-        service = enhanceService(ActivityService)
+       //service = enhanceService(ActivityService)
     }
 
-    private def enhanceService(serviceClass) {
+//    @Override
+//    MongoClient createMongoClient() {
+//        return new Fongo(getClass().name).mongo
+//    }
 
-        final serviceArtefact = grailsApplication.addArtefact(ServiceArtefactHandler.TYPE, serviceClass)
-
-        defineBeans(true) {
-            "${serviceArtefact.propertyName}"(serviceClass) { bean ->
-                bean.autowire = true
-            }
-        }
-
-        applicationContext.getBean(serviceArtefact.propertyName, serviceClass)
+    @Override
+    protected List<Class> getDomainClasses() {
+        [Activity]
     }
+
+//    private def enhanceService(serviceClass) {
+//
+//        final serviceArtefact = grailsApplication.addArtefact(ServiceArtefactHandler.TYPE, serviceClass)
+//
+//        defineBeans(true) {
+//            "${serviceArtefact.propertyName}"(serviceClass) { bean ->
+//                bean.autowire = true
+//            }
+//        }
+//
+//        applicationContext.getBean(serviceArtefact.propertyName, serviceClass)
+//    }
 
 
     private def createActivity(props) {

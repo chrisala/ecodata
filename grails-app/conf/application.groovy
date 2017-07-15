@@ -765,7 +765,7 @@ environments {
     development {
         grails {
             mongo {
-                host = "localhost"
+                host = "192.168.0.13"
                 port = "27017"
                 databaseName = "ecodata"
             }
