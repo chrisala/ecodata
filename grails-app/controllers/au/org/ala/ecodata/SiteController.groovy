@@ -18,8 +18,8 @@ class SiteController {
     // content-type. The JSON conversion is handled in the filter. This allows
     // for universal JSONP support.
     def asJson = { model ->
-        response.setContentType("application/json; charset=\"UTF-8\"")
-        model
+       // response.setContentType("application/json; charset=\"UTF-8\"")
+        render model as JSON
     }
 
     static ignore = ['action','controller','id']
@@ -27,17 +27,6 @@ class SiteController {
     def index() {
         log.debug "Total sites = ${Site.count()}"
         render "${Site.count()} sites"
-    }
-
-    def list() {
-        def list = []
-        def sites = params.includeDeleted ? Site.list() :
-            Site.findAllByStatus('active')
-        sites.each { site ->
-            list << siteService.toMap(site)
-        }
-        list.sort {it.name}
-        render list as JSON
     }
 
     def get(String id) {
@@ -67,6 +56,9 @@ class SiteController {
                     shp {
                         asShapefile s
                     }
+                    geojson {
+                        asJson(asGeoJson(s))
+                    }
                 }
 
 
@@ -85,6 +77,10 @@ class SiteController {
         builder.addSite(site.siteId)
         builder.writeShapefile(response.outputStream)
         response.outputStream.flush()
+    }
+
+    private Map asGeoJson(site) {
+        siteService.toGeoJson(site)
     }
 
     @RequireApiKey
@@ -112,7 +108,7 @@ class SiteController {
     @RequireApiKey
     def update(String id) {
         def props = request.JSON
-        log.debug props
+        log.debug "${props}"
         def result
         def message
         if (id) {
@@ -126,7 +122,7 @@ class SiteController {
         if (result.status == 'ok') {
             asJson(message)
         } else {
-            log.error result.error
+            log.error result.error.toString()
             render status:400, text: result.error
         }
     }
@@ -278,7 +274,37 @@ class SiteController {
 
     def uniqueName(String id) {
         def name = params.name
-        def result = [ value: !projectActivityService.sitesContainsName(id, name) ]
+        def entityType = params.entityType
+        def result = [ value: !siteService.sitesContainsName(id, entityType, name) ]
         respond result
+    }
+
+    /**
+     * Associate a project to a site
+     * @param id site id
+     * @param projectId
+     * @return
+     */
+    def addProject(String id){
+        String projectId = params.projectId
+        if(id && projectId){
+            Map result = siteService.addProject(id, projectId)
+            asJson result
+        } else {
+            render status: HttpStatus.SC_BAD_REQUEST, text: "Site id and project id must be provided."
+        }
+    }
+
+    /**
+     * Returns a Map with keys projectId and sites.
+     * The value of the sites key is an array of geojson Features that contains all of the sites for the supplied project.
+     * (Note that it does not return a FeatureCollection as some sites may themselves be a FeatureCollection)
+     *
+     */
+    @RequireApiKey
+    def projectSites(String id) {
+        List features = siteService.sitesForProject(id).collect({siteService.toGeoJson(siteService.toMap(it))})
+        Map result = [projectId:id, sites: features]
+        render result as JSON
     }
 }

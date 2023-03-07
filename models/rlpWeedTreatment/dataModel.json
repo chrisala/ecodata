@@ -1,0 +1,463 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "initialOrFollowup",
+                    "constraints": [
+                        "Initial",
+                        "Follow-up"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesTreated"
+                },
+                {
+                    "dataType": "number",
+                    "name": "siteCalculatedAreaHa",
+                    "computed": {
+                        "expression": "$geom.areaHa(sitesTreated)"
+                    },
+                    "units": "ha"
+                },
+                {
+                    "dataType": "number",
+                    "name": "siteCalculatedLengthKm",
+                    "computed": {
+                        "expression": "$geom.lengthKm(sitesTreated)"
+                    },
+                    "units": "km"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesTreated)"
+                    },
+                    "validate": "required,min[0]",
+                    "dataType": "number",
+                    "name": "areaTreatedHa",
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.lengthKm(sitesTreated)"
+                    },
+                    "validate": "required,min[0]",
+                    "dataType": "number",
+                    "name": "lengthTreatedKm",
+                    "units": "km"
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaInvoicedHa",
+                    "units": "ha",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaTreatedHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "name": "lengthInvoicedKm",
+                    "units": "km",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "lengthTreatedKm"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaTreatedHa, siteCalculatedAreaHa, 0.1) and within(lengthTreatedKm, siteCalculatedLengthKm, 0.1))",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaTreatedHa, 2) != roundTo(areaInvoicedHa, 2) or roundTo(lengthTreatedKm, 2) != roundTo(lengthInvoicedKm, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaTreatedHa, siteCalculatedAreaHa, 0.1) and within(lengthTreatedKm, siteCalculatedLengthKm, 0.1)) or roundTo(areaTreatedHa, 2) != roundTo(areaInvoicedHa, 2) or roundTo(lengthTreatedKm, 2) != roundTo(lengthInvoicedKm, 2)",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "columns": [
+                        {
+                            "dataType": "species",
+                            "name": "weedTargetSpecies",
+                            "dwcAttribute": "scientificName",
+                            "description": "Weed species targeted for treatment (start typing a  scientific or common name for a species)",
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "threatenedEcologicalCommunity",
+                            "validate": "maxSize[100]"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "treatmentMethod",
+                            "description": "The primary method used to treat the patch of the target species",
+                            "constraints": [
+                                "Basal bark spraying",
+                                "Biological agents",
+                                "Cut stump",
+                                "Cut and swab",
+                                "Dozing",
+                                "Felling",
+                                "Fire",
+                                "Foliar spraying",
+                                "Grubbing / chipping",
+                                "Hand pulling",
+                                "Moisture and nutrient control",
+                                "Mowing",
+                                "Overplanting",
+                                "Pushing",
+                                "Slashing",
+                                "Spot spraying",
+                                "Splatter gun",
+                                "Stem injection",
+                                "Stem scraper",
+                                "Wick applicators",
+                                "Other"
+                            ],
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "otherTreatmentMethod",
+                            "description": "Please specify the method of treatment used if Other was selected in the Type of treatment column.",
+                            "behaviour": [{
+                                "condition": "treatmentMethod == \"Other\"",
+                                "type": "enable"
+                            }],
+                            "validate": "required,maxSize[100]"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "treatmentObjective",
+                            "description": "How will the work contribute to protecting the area",
+                            "validate": "required,maxSize[300]"
+                        }
+                    ],
+                    "dataType": "list",
+                    "name": "weedSpeciesTreated"
+                }
+            ],
+            "dataType": "list",
+            "name": "weedTreatmentSites"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Weed treatment",
+    "title": "Removing weeds",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "addRowText": "New weed removal site",
+                "userAddedRows": true,
+                "source": "weedTreatmentSites",
+                "type": "repeat",
+                "items": [
+                    {
+                        "type": "row",
+                        "css": "border-bottom",
+                        "items": [{
+                            "preLabel": "Initial or follow-up treatment",
+                            "css": "span3",
+                            "source": "initialOrFollowup",
+                            "type": "selectOne"
+                        }]
+                    },
+                    {
+                        "type": "row",
+                        "items": [
+                            {
+                                "type": "col",
+                                "css": "span3 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Site/s where pest control was undertaken",
+                                                "source": "sitesTreated",
+                                                "type": "feature"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [{
+                                            "source": "siteCalculatedAreaHa",
+                                            "type": "number",
+                                            "readonly": true,
+                                            "displayOptions": {
+                                                "displayUnits": true
+                                            }
+                                        }]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [{
+
+                                            "source": "siteCalculatedLengthKm",
+                                            "type": "number",
+                                            "readonly": true,
+                                            "displayOptions": {
+                                                "displayUnits": true
+                                            }
+                                        }]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Please attach mapping details",
+                                                "source": "extraMappingDetails",
+                                                "type": "document"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Actual area (ha) / length (km) treated for weed removal",
+                                                "helpText": "Manually enter correct figure for this reporting period if different to mapped value.",
+
+                                                "source": "areaTreatedHa",
+                                                "type": "number",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "source": "lengthTreatedKm",
+                                                "type": "number",
+                                                "validate": "required",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for actual being different to mapped amount",
+                                                "source": "mappingNotAlignedReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "mappingNotAlignedComments",
+                                                "type": "textarea",
+                                                "rows": 5
+                                            }
+
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Invoiced area (ha) / length (km) treated for weed removal",
+                                                "helpText": "Enter the amount you will invoice for during this reporting period.",
+                                                "source": "areaInvoicedHa",
+                                                "type": "number",
+                                                "validate": "required",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+
+                                    },
+                                    {
+                                        "source": "lengthInvoicedKm",
+                                        "validate": "required",
+                                        "type": "number",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for invoiced amount being different to actual amount",
+                                                "source": "invoicedNotActualReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "invoicedNotActualComments",
+                                                "type": "textarea",
+                                                "rows": 5
+
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+
+                        ]
+                    },
+                    {
+                        "columns": [
+                            {
+                                "width": "20%",
+                                "source": "weedTargetSpecies",
+                                "title": "Target weed species",
+                                "type": "speciesSelect"
+                            },
+                            {
+                                "width": "22%",
+                                "source": "threatenedEcologicalCommunity",
+                                "title": "Threatened Ecological Community (if applicable)",
+                                "type": "text"
+                            },
+                            {
+                                "width": "15%",
+                                "source": "treatmentMethod",
+                                "title": "Type of treatment",
+                                "type": "select2"
+                            },
+                            {
+                                "width": "20%",
+                                "source": "otherTreatmentMethod",
+                                "title": "Type of treatment (if other)",
+                                "type": "text"
+                            },
+                            {
+                                "width": "23%",
+                                "source": "treatmentObjective",
+                                "title": "Treatment objective",
+                                "type": "textarea"
+                            }
+                        ],
+                        "userAddedRows": true,
+                        "source": "weedSpeciesTreated",
+                        "type": "table"
+                    }
+                ]
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

@@ -1,15 +1,25 @@
 package au.org.ala.ecodata
 
-import com.mongodb.*
-import com.vividsolutions.jts.geom.Geometry
+
+import com.mongodb.BasicDBObject
+import com.mongodb.DBObject
+import com.mongodb.client.MongoCollection
+import com.mongodb.client.MongoCursor
+import com.mongodb.client.model.Filters
 import grails.converters.JSON
 import org.elasticsearch.common.geo.builders.ShapeBuilder
 import org.elasticsearch.common.xcontent.XContentParser
 import org.elasticsearch.common.xcontent.json.JsonXContent
 import org.geotools.geojson.geom.GeometryJSON
+import org.grails.datastore.mapping.core.Session
+import org.grails.datastore.mapping.engine.event.EventType
 import org.grails.datastore.mapping.query.api.BuildableCriteria
+import org.grails.web.json.JSONObject
+import org.locationtech.jts.geom.Geometry
 
+import static au.org.ala.ecodata.ElasticIndex.HOMEPAGE_INDEX
 import static au.org.ala.ecodata.Status.DELETED
+import static grails.async.Promises.task
 
 class SiteService {
 
@@ -18,15 +28,15 @@ class SiteService {
     static final BRIEF = 'brief'
     static final RAW = 'raw'
     static final FLAT = 'flat'
+    static final PRIVATE = 'private'
+    static final INDEXING = 'indexing'
 
     def grailsApplication, activityService, projectService, commonService, webService, documentService, metadataService, cacheService
     PermissionService permissionService
     ProjectActivityService projectActivityService
     SpatialService spatialService
+    ElasticSearchService elasticSearchService
 
-    def getCommonService() {
-        grailsApplication.mainContext.commonService
-    }
 
     /**
      * Returns all sites in the system in a list.
@@ -93,6 +103,37 @@ class SiteService {
     }
 
     /**
+     * Returns a list of siteIds associated with a project.  This is used by the AuditService to avoid
+     * querying and mapping a full site as they can be very large sometimes and only the id is needed.
+     * @param projectId the project id of interest
+     * @return a List<String> of sitesIds
+     */
+    List<String> findAllSiteIdsForProject(String projectId) {
+        Site.createCriteria().list {
+            eq ('projects', projectId)
+            projections {
+                property('siteId')
+            }
+        }
+    }
+
+    List<Site> sitesForProject(String projectId) {
+        Site.findAllByProjectsAndStatusNotEqual(projectId, DELETED)
+    }
+
+    boolean doesProjectHaveSite(id){
+        Site.findAllByProjects(id)?.size() > 0
+    }
+
+    def findAllNonPrivateSitesForProjectId(id, levelOfDetail = []){
+        Site.withCriteria {
+            eq('status', ACTIVE)
+            ne('visibility', PRIVATE)
+            inList('projects', [id])
+        }.collect { toMap(it, levelOfDetail) }
+    }
+
+    /**
      * Converts the domain object into a map of properties, including
      * dynamic properties.
      * @param site a Site instance
@@ -100,7 +141,8 @@ class SiteService {
      * @return map of properties
      */
     def toMap(site, levelOfDetail = [], version = null) {
-        def mapOfProperties = site instanceof Site ? site.getProperty("dbo").toMap() : site
+        def mapOfProperties = site instanceof Site ? GormMongoUtil.extractDboProperties(site.getProperty("dbo")) : site
+       // def mapOfProperties = site instanceof Site ? site.getProperty("dbo") : site
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
@@ -117,7 +159,39 @@ class SiteService {
             }
         }
 
+        if (levelOfDetail.contains(INDEXING)) {
+            mapOfProperties.geometryType = site.geometryType
+            mapOfProperties.geoPoint = site.geoPoint
+        }
+
         mapOfProperties.findAll {k,v -> v != null}
+    }
+
+    Map toGeoJson(Map site) {
+
+        Map properties = [
+                id:site.siteId,
+                name:site.name,
+                type:site.type,
+                notes:site.notes,
+        ]
+        Map geojson
+
+        if (site.type == Site.TYPE_COMPOUND) {
+            geojson = [
+                    type:'FeatureCollection',
+                    properties: properties,
+                    features: site.features
+            ]
+        }
+        else {
+            geojson = [
+                    type:"Feature",
+                    properties:properties,
+                    geometry: geometryAsGeoJson(site)
+            ]
+        }
+        geojson
     }
 
     def loadAll(list) {
@@ -127,7 +201,7 @@ class SiteService {
     }
 
     def create(props) {
-        assert getCommonService()
+      //  assert getCommonService()
         def site = new Site(siteId: Identifiers.getNew(true,''))
         try {
             site.save(failOnError: true)
@@ -167,15 +241,38 @@ class SiteService {
     private updateSite(Site site, Map props, boolean forceRefresh = false) {
         props.remove('id')
         props.remove('siteId')
+        // Used by BioCollect to improve the performance of site creation
+        def asyncUpdate = props['asyncUpdate']?props['asyncUpdate']:false
+        props.remove('asyncUpdate')
 
         assignPOIIds(props)
-
         // If the site location is being updated, refresh the location metadata.
         if (forceRefresh || hasGeometryChanged(toMap(site), props)) {
-            populateLocationMetadataForSite(props)
+            if (asyncUpdate){
+                // Sharing props object between thread causes ConcurrentModificationException.
+                // Cloned object is used by spawned thread.
+                // https://github.com/AtlasOfLivingAustralia/ecodata/issues/594
+                Map clonedProps = new JSONObject(props)
+                String userId = props.remove('userId')
+                String siteId = site.siteId
+                task {
+                    Site.withNewSession { Session session ->
+                        Site createdSite = Site.findBySiteId(siteId)
+                        addSpatialPortalPID(clonedProps, userId)
+                        populateLocationMetadataForSite(clonedProps)
+                        commonService.updateProperties(createdSite, clonedProps)
+                    }
+                }
+            }
+            else {
+                populateLocationMetadataForSite(props)
+            }
         }
-        getCommonService().updateProperties(site, props)
+
+        //getCommonService().updateProperties(site, props)
+        commonService.updateProperties(site, props)
     }
+
 
     /** Recomputing geographic facets, centroid and area can be expensive so we only want to do it if we have to */
     private boolean hasGeometryChanged(Map site, Map newProps) {
@@ -229,6 +326,9 @@ class SiteService {
             if (canRemoveProject(site, projectId)) {
                 site.projects.remove(projectId)
                 site.save()
+
+                IndexDocMsg message = new IndexDocMsg(docType: Project.class.name, docId: projectId, indexType: EventType.PostUpdate, docIds: [])
+                elasticSearchService.queueIndexingEvent(message)
 
                 if (deleteOrphans && canDelete(site)) {
                     if (deleteOrphans) {
@@ -367,7 +467,7 @@ class SiteService {
             case 'Circle':
                 // We support circles, but they are not valid geojson.
                 Geometry geom = GeometryUtils.geometryForCircle(geometry.coordinates[1], geometry.coordinates[0], geometry.radius)
-                result = [type:'Polygon', coordinates: Arrays.asList(geom.coordinates).collect{[it.x, it.y]}]
+                result = [type:'Polygon', coordinates: [Arrays.asList(geom.coordinates).collect{[it.x, it.y]}]]
 
                 break
             case 'Point':
@@ -377,21 +477,45 @@ class SiteService {
                 coords = [coords[0] as Double, coords[1] as Double]
                 result = [type:'Point', coordinates:coords]
                 break
+            case 'MultiPoint':
+                if (!geometry.coordinates) {
+                    log.error("Invalid site: ${site.siteId} missing coordinates")
+                    return
+                }
+                result = [type:'MultiPoint', coordinates: geometry.coordinates]
+                break
             case 'Polygon':
                 if (!geometry.coordinates) {
                     log.error("Invalid site: ${site.siteId} missing coordinates")
                     return
                 }
-                // The map drawing tools allow you to draw lines using the "polygon" tool.
-                def coordinateLength = geometry.coordinates.size()
-                if (coordinateLength == 1 && geometry.coordinates[0] instanceof List) {
-                    def type = geometry.coordinates[0].size() < 4 ? 'MultiLineString' : 'MultiPolygon'
-                    result = [type:type, coordinates: geometry.coordinates]
+
+                geometry.coordinates = removeDuplicatesFromCoordinates(geometry.coordinates)
+                if(!isValidPolygon(geometry.coordinates)){
+                    // The map drawing tools allow you to draw lines using the "polygon" tool.
+                    def coordinateLength = geometry.coordinates.size()
+                    if (coordinateLength == 1 && geometry.coordinates[0] instanceof List) {
+                        def type = geometry.coordinates[0].size() < 4 ? 'MultiLineString' : 'MultiPolygon'
+                        result = [type:type, coordinates: [geometry.coordinates]]
+                    }
+                    else {
+                        def type = coordinateLength < 4 ? 'LineString' : 'Polygon'
+                        result = [type: type, coordinates: [geometry.coordinates]]
+                    }
+                } else {
+                    result =  [type:geometry.type, coordinates: geometry.coordinates]
                 }
-                else {
-                    def type = coordinateLength < 4 ? 'LineString' : 'Polygon'
-                    result = [type: type, coordinates: geometry.coordinates]
+                break
+            case 'LineString':
+            case 'MultiPolygon':
+            case 'MultiLineString':
+                if (!geometry.coordinates) {
+                    log.error("Invalid site: ${site.siteId} missing coordinates")
+                    return
                 }
+
+                geometry.coordinates = removeDuplicatesFromCoordinates(geometry.coordinates)
+                result =  [type:geometry.type, coordinates: geometry.coordinates]
                 break
             case 'pid':
                 result = geometryForPid(geometry.pid)
@@ -400,8 +524,65 @@ class SiteService {
         result
     }
 
+    Boolean isValidPolygon (List coordinates){
+        Boolean valid = false
+        Integer depth = 0
+        def coord = coordinates
+
+        while( coord instanceof List){
+            depth ++;
+            coord = coord[0]
+        }
+
+        if(depth == 3){
+            valid = true
+        }
+
+        valid
+    }
+
+    /**
+     * Removes consecutive duplicate coordinates. Elasticsearch throws exception.
+     * @param coordinates
+     * @return
+     */
+    List removeDuplicatesFromCoordinates(List coordinates){
+        if(!(coordinates instanceof List && coordinates[0] instanceof List && (coordinates[0][0] instanceof List || coordinates[0][0]?.toString()?.isNumber()))){
+            return coordinates
+        }
+
+        if((coordinates instanceof List) && ( coordinates[0] instanceof List)  && !(coordinates[0][0] instanceof List)){
+            return removeDuplicatePoint(coordinates)
+        } else {
+            for (int i = 0; i < coordinates.size(); i++) {
+                coordinates[i] = removeDuplicatesFromCoordinates(coordinates[i])
+            }
+        }
+
+        coordinates
+    }
+
+    List removeDuplicatePoint(List points){
+        List vettedCoordinates = []
+        List previousPoint
+
+        points?.each { List point ->
+            if(!point.equals(previousPoint)){
+                vettedCoordinates.add(point)
+            } else if(previousPoint == null){
+                vettedCoordinates.add(point)
+            } else {
+                log.debug("Duplicate points identified - ${point}")
+            }
+
+            previousPoint = point
+        }
+
+        vettedCoordinates
+    }
+
     def geometryForPid(pid) {
-        def url = "${grailsApplication.config.spatial.baseUrl}/ws/shape/geojson/${pid}"
+        def url = "${grailsApplication.config.getProperty('spatial.baseUrl')}/ws/shape/geojson/${pid}"
         webService.getJson(url)
     }
 
@@ -426,6 +607,7 @@ class SiteService {
             else {
                 log.error("No geometry for site: ${site.siteId}")
             }
+
             site.extent.geometry += lookupGeographicFacetsForSite(site)
         }
     }
@@ -535,14 +717,14 @@ class SiteService {
      * @param action the action to be performed on each Activity.
      */
     void doWithAllSites(Closure action, Integer max = null) {
-        // Due to various memory & performance issues with GORM mongo plugin 1.3, this method uses the native API.
-        com.mongodb.DBCollection collection = Site.getCollection()
-        DBObject siteQuery = new QueryBuilder().start('status').notEquals(DELETED).get()
-        DBCursor results = collection.find(siteQuery).batchSize(100)
+
+        MongoCollection collection = Site.getCollection()
+        def results = collection.find(Filters.ne('status', DELETED)).batchSize(100)
 
         results.each { dbObject ->
-            action.call(dbObject.toMap())
+            action.call(dbObject)
         }
+
     }
 
 
@@ -575,7 +757,16 @@ class SiteService {
     }
 
     void reloadSiteMetadata(List<String> fids = null, Date modifiedBefore = null, Integer max = 1000) {
-        com.mongodb.DBCollection collection = Site.getCollection()
+        def collection = Site.getCollection()
+
+       /* Bson query = Filters.and(
+                                Filters.ne("status", "DELETED"),
+                                (Filters.and(Filters.exists("projects", true), Filters.ne("projects", []))),
+                                Filters.ne("refreshed", "Y")
+                            )
+        if (modifiedBefore) {
+            query.and(Filters.lt("lastUpdated", modifiedBefore))
+        }*/
 
         BasicDBObject query = new BasicDBObject()
         query.put('status', new BasicDBObject('$ne', DELETED))
@@ -586,21 +777,14 @@ class SiteService {
         }
 
         println collection.count(query)
-        DBCursor results = collection.find(query).batchSize(10).addOption(Bytes.QUERYOPTION_NOTIMEOUT).limit(max)
+        MongoCursor results = collection.find(query).batchSize(10).limit(max).iterator()
         int count = 0
         while (results.hasNext()) {
             DBObject site = results.next()
             try {
                 if (site.extent?.geometry) {
-
-                    if (site.extent?.geometry.aream2 == null) {
-                        populateLocationMetadataForSite(site)
-                    }
-                    else {
                         Map<String, List<String>> geoFacets = lookupGeographicFacetsForSite(site, fids)
                         site.extent.geometry.putAll(geoFacets)
-                    }
-
                 }
                 else {
                     log.warn( "No geometry for site "+site)
@@ -654,4 +838,73 @@ class SiteService {
 
         return true
     }
+
+    def sitesContainsName(String id, String entityType, String name) {
+
+        def sites
+        if(entityType == 'projectActivity') {
+            def projectActivity = ProjectActivity.findByProjectActivityId(id)
+            sites = projectActivity.sites
+        } else if (entityType == 'project') {
+            sites = Site.findAllByProjects(id).findAll({ it.status == ACTIVE }).collect { it.siteId }
+        } else {
+            throw new IllegalArgumentException("No entity type provided")
+        }
+
+        return Site.countBySiteIdInListAndName(sites, name) > 0
+    }
+
+    def addSpatialPortalPID(Map props, String userId){
+        //if its a drawn shape, save and get a PID
+        if (props?.extent?.source?.toLowerCase() == 'drawn') {
+            def shapePid = persistSiteExtent(props.name, props.extent.geometry, userId)
+            props.extent.geometry.pid = shapePid?.resp?.id ?: ""
+
+            if (!props.extent.geometry.pid) {
+                log.error("Failed persisting site on spatial portal. Site Id ${props.siteId}")
+            }
+        }
+    }
+
+    def persistSiteExtent(name, geometry, userId = "") {
+
+        def resp = null
+        if (geometry?.type == 'Circle') {
+            def body = [name: name, description: "my description", user_id: userId, api_key: grailsApplication.config.getProperty('api_key')]
+            def url = grailsApplication.config.getProperty('spatial.baseUrl') + "/ws/shape/upload/pointradius/" +
+                    geometry?.coordinates[1] + '/' + geometry?.coordinates[0] + '/' + (geometry?.radius / 1000)
+            resp = webService.doPost(url, body)
+        } else if (geometry?.type in ['Polygon', 'LineString']) {
+            def body = [geojson: [type: geometry.type, coordinates: geometry.coordinates], name: name, description: 'my description', user_id: userId, api_key: grailsApplication.config.getProperty('api_key')]
+            resp = webService.doPost(grailsApplication.config.getProperty('spatial.baseUrl') + "/ws/shape/upload/geojson", body)
+        }
+
+        resp
+    }
+
+    def getSiteCentroid(Map site) {
+        if ( site?.extent?.geometry?.centre ) {
+            List coords = site.extent.geometry.centre
+            [coords[0] as Double, coords[1] as Double]
+        }
+    }
+
+    int calculateGeohashPrecision(Map boundingBox) {
+        Geometry geom = GeometryUtils.geoJsonMapToGeometry(boundingBox)
+        double area = GeometryUtils.area(geom)
+        List lookupTable = grailsApplication.config.getProperty('geohash.lookupTable', List)
+        int maxNumberOfGrids = grailsApplication.config.getProperty('geohash.maxNumberOfGrids', Integer)
+        int maxLengthIndex = grailsApplication.config.getProperty('geohash.maxLength', Integer)
+        Map step
+
+        for(int i = 0; i < maxLengthIndex;  i++) {
+            step = lookupTable[i]
+            if ( (area / step.area) > maxNumberOfGrids ) {
+                break
+            }
+        }
+
+        step.length
+    }
+
 }

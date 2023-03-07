@@ -69,6 +69,69 @@
                     }
                 });
 
+                $("#btnUpdateCollectoryForBiocollectProjects").click(function(e) {
+                    e.preventDefault();
+                    $.ajax("${createLink(controller: 'admin', action:'updateCollectoryEntryForBiocollectProjects')}").done(function(result) {
+                        document.location.reload();
+                    }).fail(function (result) {
+                        alert(result);
+                    });
+                });
+
+                $("#btnBuildGeoServerComponents").click(function(e) {
+                    e.preventDefault();
+                    $.ajax("${createLink(controller: 'admin', action:'buildGeoServerDependencies')}").done(function(result) {
+                        document.location.reload();
+                    }).fail(function (resp) {
+                        var result = JSON.parse(resp.responseText)
+                        alert(result.message);
+                    });
+                });
+
+                $("#btnMigrateUserDetailsToEcodata").click(function(e) {
+                    e.preventDefault();
+                    $.ajax("${createLink(controller: 'admin', action:'migrateUserDetailsToEcodata')}").done(function(result) {
+                    alert(result);
+                        document.location.reload();
+                    }).fail(function (result) {
+                        alert(result);
+                    });
+                });
+
+                $("#createDataDescription").change(function() {
+                    if ($("#createDataDescription").val()) {
+                        $("#btnImportDataDescription").removeAttr("disabled");
+                    }
+                    else {
+                        $("#btnImportDataDescription").attr("disabled", "disabled");
+                    }
+
+                }).trigger('change');
+
+                $('#btnImportDataDescription').click(function(e) {
+                    e.preventDefault();
+                    $('form.createDataDescription').submit();
+                });
+
+                $('#btnRegenerateBioCollectRecords').click(function(e) {
+                    e.preventDefault();
+                    $.ajax("${createLink(controller: 'admin', action:'regenerateRecordsForALAHarvestableProjects')}").done(function(result) {
+                        alert(result);
+                        document.location.reload();
+                    }).fail(function (result) {
+                        alert(result);
+                    });
+                });
+
+                $('#btnUpdateStats').click(function(e) {
+                    e.preventDefault();
+                    $.ajax("${createLink(controller: 'admin', action:'triggerProjectActivityStatsUpdate')}").done(function(result) {
+                        alert(result);
+                        document.location.reload();
+                    }).fail(function (result) {
+                        alert(result);
+                    });
+                });
             });
         </asset:script>
         <content tag="pageTitle">Tools</content>
@@ -136,6 +199,60 @@
                     <p>
                     Output id: <input type="text" id="outputId" name="outputId" class="input-xxxlarge">
                     </p>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button id="btnUpdateCollectoryForBiocollectProjects" class="btn btn-small btn-info" title="Forcefully update information in Collectory of internal Biocollect projects.">Update Collectory</button>
+                </td>
+                <td>
+                    Forcefully update information in Collectory of internal Biocollect projects. Note: This does not create a new entry since it assumes an entry exists in Collectory.
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button id="btnBuildGeoServerComponents" class="btn btn-small btn-info" title="Clear GeoServer components.">Built GeoServer</button>
+                </td>
+                <td>
+                    Delete existing layers, store and workspace associates with Ecodata and create new ones.
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button id="btnMigrateUserDetailsToEcodata" class="btn btn-small btn-info" title="Migrate UserDetails to Ecodata.">Migrate UserDetails</button>
+                </td>
+                <td>
+                    Migrate the existing MERIT users from UserDetails into the Eccodata Database
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button disabled id="btnImportDataDescription" class="btn btn-small btn-info" title="Update Data Description.">Update Data Description</button>
+                </td>
+                <td>
+                    Import data into DataDescription collection.
+                    <g:uploadForm class="createDataDescription" action="createDataDescription">
+                        <div><input id="createDataDescription" type="file" name="descriptionData"/></div>
+                    </g:uploadForm>
+
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button id="btnRegenerateBioCollectRecords" class="btn btn-small btn-info" title="Regenerate BioCollect records.">Regenerate BioCollect records</button>
+                </td>
+                <td>
+                    Regenerate BioCollect records updates created Darwin Core Records with current record creation logic.
+                    Use this to update properties of DwC records if a new property is added or tranformation logic for a property has changed.<br>
+                    <b>Note: THIS WILL TAKE A LONG TIME. MUST RUN DURING LOW USAGE.</b>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <button id="btnUpdateStats" class="btn btn-small btn-info" title="Regenerate BioCollect records.">Generate project activity stats</button>
+                </td>
+                <td>
+                    Generate and store project activity stats in cache. This button triggers the stats compute manually.
                 </td>
             </tr>
             </tbody>

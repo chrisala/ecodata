@@ -1,9 +1,7 @@
 package au.org.ala.ecodata
 
-import grails.gorm.CriteriaBuilder
 import org.grails.datastore.mapping.engine.event.AbstractPersistenceEvent
 import org.grails.datastore.mapping.engine.event.EventType
-import org.grails.datastore.mapping.mongo.MongoSession
 import org.grails.datastore.mapping.query.api.BuildableCriteria
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -94,7 +92,7 @@ class AuditService {
      */
     public int flushMessageQueue(int maxMessagesToFlush = 1000) {
         int messageCount = 0
-        AuditMessage.withNewSession { MongoSession session ->
+        AuditMessage.withNewSession { session ->
             try {
                 AuditMessage message = null;
                 while (messageCount < maxMessagesToFlush && (message = _messageQueue.poll()) != null) {
@@ -105,7 +103,7 @@ class AuditService {
                 }
                 session.flush()
             } catch (Exception ex) {
-                log.error(ex)
+                log.error(ex.getMessage(), ex)
             }
             return messageCount
         }
@@ -164,19 +162,13 @@ class AuditService {
         }
 
         // Sites have a collection of projects to which they belong
-        def sites = siteService.findAllForProjectId(projectId)
-        sites.each { site ->
-            def siteMessages = AuditMessage.findAllByEntityId(site.siteId)
-            results.addAll(siteMessages)
-        }
+        List siteIds = siteService.findAllSiteIdsForProject(projectId)
+        results.addAll(AuditMessage.findAllByEntityIdInList(siteIds))
 
         // Documents are funny. They have multiple foreign key ids (siteId, outputId, projectId and activityId), although usually only one
         // will be populated at any time.
         // Project documents will already in the list as a direct association. We already have lists of associated sites, outputs and activities,
         // so we can use those to query for associated documents
-        def siteIds = sites*.siteId
-
-        println siteIds
         def c = Document.createCriteria()
         def documentIds = c {
             or {
@@ -213,7 +205,9 @@ class AuditService {
     List getAuditMessagesForSettings(String keyPrefix) {
 
         // We can get away with this because the number of settings objects is small.
-        List settingIds = Setting.findAll().findAll{it.key.startsWith(keyPrefix)}.collect{it._id.toHexString()}
+        List settingIds = Setting.findAll().findAll{it.key.startsWith(keyPrefix)}.collect{
+            it.id.toHexString()
+        }
 
         List results = AuditMessage.findAllByEntityIdInList(settingIds)
 
@@ -250,14 +244,13 @@ class AuditService {
         }
 
         // Sites have a collection of projects to which they belong
-        List sites = siteService.findAllForProjectId(projectId)
+        List siteIds = siteService.findAllSiteIdsForProject(projectId)
+        entityIds.addAll(siteIds)
 
         // Documents are funny. They have multiple foreign key ids (siteId, outputId, projectId and activityId), although usually only one
         // will be populated at any time.
         // Project documents will already in the list as a direct association. We already have lists of associated sites, outputs and activities,
         // so we can use those to query for associated documents
-        List siteIds = sites*.siteId
-        entityIds.addAll(siteIds)
 
         BuildableCriteria c = Document.createCriteria()
         List documentIds = c {
@@ -281,7 +274,6 @@ class AuditService {
         Closure getByLike = {
             or {
                 ilike 'entityType', "%${q}%"
-                ilike 'eventType', "%${q}%"
                 ilike 'entity.name', "%${q}%"
             }
         }

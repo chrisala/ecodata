@@ -39,7 +39,7 @@ class RecordAlertService {
     void alertSubscribers(Record record) {
 
         def pActivity = projectActivityService.get(record?.projectActivityId)
-        def project = projectService.get(record?.projectId)
+        def project = projectService.get(record?.projectId, ProjectService.PRIVATE_SITES_REMOVED)
 
         if(!project?.isMerit && isAlertRequired(pActivity, record?.guid)) {
             Map values = [:]
@@ -49,8 +49,8 @@ class RecordAlertService {
             values.occurrenceID = record.occurrenceID
             values.pActivityName = pActivity?.name
             values.projectName = project?.name
-            values.activityUrl = grailsApplication.config.biocollect.activity.url + record?.activityId
-            values.projectUrl = grailsApplication.config.biocollect.project.url + project?.projectId
+            values.activityUrl = grailsApplication.config.getProperty('biocollect.activity.url') + record?.activityId
+            values.projectUrl = grailsApplication.config.getProperty('biocollect.project.url') + project?.projectId
 
             String body = groovyPageRenderer.render(template: "/email/speciesAlert", model:[values: values])
             emailService.sendEmail("Species Alert", body, pActivity?.alert?.emailAddresses?.collect{it})

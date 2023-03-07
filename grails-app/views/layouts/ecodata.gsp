@@ -2,14 +2,12 @@
 <html lang="en">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <meta name="app.version" content="${g.meta(name:'app.version')}"/>
-    <meta name="app.build" content="${g.meta(name:'app.build')}"/>
+    <meta name="app.version" content="${g.meta(name:'info.app.version')}"/>
     <meta name="description" content="Atlas of Living Australia"/>
     <meta name="author" content="Atlas of Living Australia">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title><g:layoutTitle /></title>
-
     <asset:stylesheet src="ecodata.css"/>
     <g:layoutHead />
 </head>
@@ -25,7 +23,7 @@
                 <div class="nav-collapse collapse">
                     <div class="navbar-text pull-right">
                         <span id="buttonBar">
-                            <ec:currentUserDisplayName />&nbsp;<hf:loginLogout cssClass="btn btn-small" logoutUrl="${createLink(controller:'logout', action:'logout')}"/>
+                            <ec:currentUserDisplayName />&nbsp;<button id="btnLogout" class='btn btn-small'>Logout</button>
                             %{--<button class="btn btn-small btn-info" id="btnProfile"><i class="icon-user icon-white"></i>&nbsp;My Profile</button>--}%
                             <button class="btn btn-warning btn-small" id="btnAdministration"><i class="icon-cog icon-white"></i>&nbsp;Administration</button>
                             <g:pageProperty name="page.buttonBar"/>
@@ -47,7 +45,7 @@
         $.ajaxSetup({ cache: false });
 
         $("#btnLogout").click(function (e) {
-            window.location = "${createLink(controller: 'logout', action:'index')}";
+            window.location = "${createLink(controller: 'admin', action:'logout')}";
         });
 
         $("#btnAdministration").click(function (e) {

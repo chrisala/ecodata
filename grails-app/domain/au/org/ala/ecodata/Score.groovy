@@ -1,6 +1,10 @@
 package au.org.ala.ecodata
 
+import org.bson.types.ObjectId
+
 class Score {
+
+    ObjectId id
 
     String status = 'active'
     
@@ -46,6 +50,7 @@ class Score {
     }
 
     static mapping = {
+
         scoreId index: true
         version false
     }
@@ -54,5 +59,30 @@ class Score {
         if (scoreId == null) {
             scoreId = Identifiers.getNew(true, "")
         }
+    }
+
+    /**
+     * Converts a Score domain object to a Map.
+     * @param score the Score to convert.
+     * @param views specifies the data to include in the Map.  Only current supported value is "configuration",
+     * which will return the score and it's associated configuration.
+     *
+     */
+    Map toMap(boolean includeConfig = false) {
+        Map scoreMap = [
+                scoreId:scoreId,
+                category:category,
+                outputType:outputType,
+                isOutputTarget:isOutputTarget,
+                label:label,
+                description:description,
+                displayType:displayType,
+                entity:entity,
+                externalId:externalId,
+                entityTypes:entityTypes]
+        if (includeConfig) {
+            scoreMap.configuration = configuration
+        }
+        scoreMap
     }
 }

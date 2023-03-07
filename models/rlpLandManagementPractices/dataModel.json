@@ -1,0 +1,433 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "initialOrFollowup",
+                    "constraints": [
+                        "Initial",
+                        "Follow-up"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "implementationSite"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.areaHa(implementationSite)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedAreaImplementedHa",
+                    "units": "ha"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.lengthKm(implementationSite)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedLengthImplementedKm",
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(implementationSite)"
+                    },
+                    "dataType": "number",
+                    "name": "areaImplementedHa",
+                    "validate": "required,min[0]",
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.lengthKm(implementationSite)"
+                    },
+                    "dataType": "number",
+                    "name": "lengthImplementedKm",
+                    "validate": "required,min[0]",
+                    "units": "km"
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(calculatedAreaImplementedHa, areaImplementedHa, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(calculatedAreaImplementedHa, areaImplementedHa, 0.1)) or roundTo(areaImplementedHa, 2) != roundTo(areaImplementedInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaImplementedInvoicedHa",
+                    "units": "ha",
+                    "validate": [
+                        {"rule": "min[0]"},
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaImplementedHa"
+                            }
+                        }
+                    ]
+                },
+
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaImplementedHa, 2) != roundTo(areaImplementedInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "text",
+                    "name": "practiceChangeType",
+                    "description": "",
+                    "constraints": [
+                        "Fencing",
+                        "Erosion management",
+                        "Stocking rates",
+                        "Watering arrangements",
+                        "Paddock design",
+                        "Rotation grazing",
+                        "Permaculture",
+                        "Other"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "otherPracticeChangeType",
+                    "description": "Please specify the type of land management practice change if Other (specify in notes) was selected in the Type of land management practice change.",
+                    "behaviour": [{
+                        "condition": "practiceChangeType == \"Other\"",
+                        "type": "enable"
+                    }],
+                    "validate": "required,maxSize[100]"
+                },
+                {
+                    "dataType": "text",
+                    "name": "industryType",
+                    "constraints": [
+                        "Broad acre cropping",
+                        "Dairy",
+                        "Horticulture",
+                        "Grazing",
+                        "Fisheries",
+                        "Aquaculture",
+                        "Environment"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "practiceChangeObjective",
+                    "description": "How will the practice change/s contribute to the area",
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "offSiteBenefitSites"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(offSiteBenefitSites)"
+                    },
+                    "dataType": "number",
+                    "name": "offSiteBenefitAreaHa",
+                    "validate": [
+                        {
+                            "rule": "min",
+                            "param": {
+                                "type": "computed",
+                                "expression": "$geom.areaHa(offSiteBenefitSites)*0.9"
+                            }
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "$geom.areaHa(offSiteBenefitSites)*1.1"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "evidenceOfBenefit",
+                    "validate": "maxSize[300]"
+                }
+            ],
+            "dataType": "list",
+            "name": "landManagementDetails"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Improving land management practices",
+    "title": "Improving land management practices",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "columns": [
+                    {
+                        "width": "10%",
+                        "source": "initialOrFollowup",
+                        "type": "selectOne",
+                        "title": "Initial or follow-up control?"
+                    },
+                    {
+                        "type": "col",
+                        "width": "5%",
+                        "title": "Site/s covered by practice change",
+                        "items": [
+                            {
+                                "source": "implementationSite",
+                                "type": "feature"
+                            },
+                            {
+                                "source": "calculatedAreaImplementedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                },
+                                "readonly": "readonly"
+
+                            },
+                            {
+                                "source": "calculatedLengthImplementedKm",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                },
+                                "readonly": "readonly"
+
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Please attach mapping details",
+                                        "source": "extraMappingDetails",
+                                        "type": "document"
+                                    }
+                                ]
+                            }
+                        ]
+
+                    },
+                    {
+                        "type": "col",
+                        "items": [
+                            {
+                                "source": "areaImplementedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "lengthImplementedKm",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },{
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for actual being different to mapped amount",
+                                        "source": "mappingNotAlignedReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "mappingNotAlignedComments",
+                                        "type": "textarea",
+                                        "rows": 5
+                                    }
+
+                                ]
+                            }
+
+                        ],
+                        "width": "15%",
+                        "title": "Actual area (ha) covered by practice change",
+                        "helpText": "Enter the amount you will invoice for during this reporting period."
+                    },
+                    {
+                        "width": "15%",
+                        "type": "col",
+                        "title": "Invoiced area (ha) covered by practice change",
+                        "helpText": "Enter the amount you will invoice for during this reporting period.",
+                        "items": [
+                            {
+                                "source": "areaImplementedInvoicedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for invoiced amount being different to actual amount",
+                                        "source": "invoicedNotActualReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "invoicedNotActualComments",
+                                        "type": "textarea",
+                                        "rows": 5
+
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "15%",
+                        "title": "Type of action",
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "practiceChangeType",
+                                        "type": "select2"
+                                    }
+                                ]
+                            },
+                            {
+                                "source": "otherPracticeChangeType",
+                                "title": "Type of action (if Other)",
+                                "type": "text"
+                            }
+                        ]
+
+                    },
+                    {
+                        "width": "10%",
+                        "source": "industryType",
+                        "title": "Industry type",
+                        "type": "selectOne"
+                    },
+                    {
+                        "width": "15%",
+                        "source": "practiceChangeObjective",
+                        "title": "Purpose of improving land management practice",
+                        "type": "textarea"
+                    },
+                    {
+                        "width": "15%",
+                        "title": "Please map any off-site area/s if they benefitted from this practice change",
+                        "type": "col",
+                        "items": [
+                            {
+                                "source": "offSiteBenefitSites",
+                                "type": "feature"
+                            },
+                            {
+                                "source": "offSiteBenefitAreaHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "evidenceOfBenefit",
+                                "placeholder": "Please provide a description on the evidence available to reflect this benefit",
+                                "type": "textarea"
+                            }
+                        ]
+
+                    }
+
+                ],
+                "userAddedRows": true,
+                "source": "landManagementDetails",
+                "type": "table"
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

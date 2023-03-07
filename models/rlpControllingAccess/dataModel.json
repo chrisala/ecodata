@@ -1,0 +1,413 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "number",
+                    "name": "numberInstalled",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesInstalled"
+                },
+                {
+                    "dataType": "number",
+                    "name": "sitesInstalledCalculatedAreaHa",
+                    "computed": {
+                        "expression": "$geom.areaHa(sitesInstalled)"
+                    },
+                    "units": "ha"
+                },
+                {
+                    "dataType": "number",
+                    "name": "sitesInstalledCalculatedLengthKm",
+                    "computed": {
+                        "expression": "$geom.lengthKm(sitesInstalled)"
+                    },
+                    "units": "km"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaInstalledHa, sitesInstalledCalculatedAreaHa, 0.1) and within(lengthInstalledKm, sitesInstalledCalculatedLengthKm, 0.1)) or roundTo(areaInstalledHa, 2) != roundTo(areaInvoicedHa, 2) or roundTo(lengthInstalledKm, 2) != roundTo(lengthInvoicedKm, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaInstalledHa",
+                    "units": "ha",
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesInstalled)"
+                    },
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "number",
+                    "name": "lengthInstalledKm",
+                    "units": "km",
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.lengthKm(sitesInstalled)"
+                    },
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaInvoicedHa",
+                    "units": "ha",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaInstalledHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "name": "lengthInvoicedKm",
+                    "units": "km",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "lengthInstalledKm"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaInstalledHa, sitesInstalledCalculatedAreaHa, 0.1) and within(lengthInstalledKm, sitesInstalledCalculatedLengthKm, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaInstalledHa, 2) != roundTo(areaInvoicedHa, 2) or roundTo(lengthInstalledKm, 2) != roundTo(lengthInvoicedKm, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "protectedSites"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(protectedSites)"
+                    },
+                    "dataType": "number",
+                    "name": "areaProtectedHa",
+                    "units": "ha"
+                },
+                {
+                    "dataType": "text",
+                    "name": "accessControlType",
+                    "description": "",
+                    "constraints": [
+                        "Boardwalks",
+                        "Bollards & barriers",
+                        "Constructed parking bays",
+                        "Fencing, styles, gates & grids",
+                        "Formed traffic ways",
+                        "Signage",
+                        "Other"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "otherAccessControlType",
+                    "description": "Please specify the type of access control if Other (specify in notes) was selected in the Type of Access Control Installed column.",
+                    "behaviour": [{
+                        "condition": "accessControlType == \"Other\"",
+                        "type": "enable"
+                    }],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "controlObjective",
+                    "description": "What is your access control method? and/or What do you intend to achieve by using your structure/s?",
+                    "validate": "required,maxSize[300]"
+                }
+            ],
+            "dataType": "list",
+            "name": "accessControlDetails"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Controlling access",
+    "title": "Controlling access",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "columns": [
+                    {
+                        "width": "5%",
+                        "source": "numberInstalled",
+                        "type": "number",
+                        "title": "Number of structures installed"
+                    },
+                    {
+                        "width": "10%",
+                        "type": "col",
+                        "title": "Site/s where access has been controlled",
+                        "items": [
+                            {
+                                "type": "feature",
+                                "source": "sitesInstalled"
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "type": "number",
+                                        "source": "sitesInstalledCalculatedAreaHa",
+                                        "readonly": true,
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "type": "number",
+                                        "source": "sitesInstalledCalculatedLengthKm",
+                                        "readonly": true,
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Please attach mapping details",
+                                        "source": "extraMappingDetails",
+                                        "type": "document"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "15%",
+                        "type": "col",
+                        "title": "Actual length (km) / area (ha) where access has been controlled",
+                        "helpText": "May be changed manually if different to the calculated areas",
+                        "items": [
+                            {
+                                "type": "number",
+                                "source": "areaInstalledHa",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "number",
+                                "source": "lengthInstalledKm",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for actual being different to mapped amount",
+                                        "source": "mappingNotAlignedReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "mappingNotAlignedComments",
+                                        "type": "textarea",
+                                        "rows": 5
+                                    }
+
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "15%",
+                        "type": "col",
+                        "title": "Area (ha) / Length (km) invoiced",
+                        "helpText": "May be changed manually if different to the calculated areas",
+                        "items": [
+                            {
+                                "type": "number",
+                                "source": "areaInvoicedHa",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "number",
+                                "source": "lengthInvoicedKm",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for invoiced amount being different to actual amount",
+                                        "source": "invoicedNotActualReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "invoicedNotActualComments",
+                                        "type": "textarea",
+                                        "rows": 5
+
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "10%",
+
+                        "type": "col",
+                        "title": "Site/s protected by access control structures",
+                        "items": [
+                            {
+                                "source": "protectedSites",
+                                "type": "feature"
+                            },
+                            {
+                                "source": "areaProtectedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            }
+                        ]
+
+                    },
+                    {
+                        "type": "col",
+                        "items": [
+                            {
+                                "source": "accessControlType",
+                                "type": "select2"
+                            },
+                            {
+                                "source": "otherAccessControlType",
+                                "type": "text"
+                            }
+                        ],
+                        "title": "Type of access control installed",
+                        "width": "20%"
+
+                    },
+                    {
+                        "width": "25%",
+                        "source": "controlObjective",
+                        "title": "Control objective",
+                        "type": "textarea",
+                        "rows": 5
+                    }
+                ],
+                "userAddedRows": true,
+                "source": "accessControlDetails",
+                "type": "table"
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos of the access control work performed",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

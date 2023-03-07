@@ -1,16 +1,14 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
-import org.codehaus.groovy.grails.commons.DomainClassArtefactHandler
-
-import java.text.SimpleDateFormat
+import org.grails.core.artefact.DomainClassArtefactHandler
+import org.springframework.context.MessageSourceResolvable
 
 class CommonService {
 
-    //static transactional = false
+   // static transactional = false
     def grailsApplication, cacheService
-
-    static dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ssZ")
+    def messageSource
 
     /**
      * Updates all properties other than 'id' and converts date strings to BSON dates.
@@ -23,12 +21,13 @@ class CommonService {
      * @param o the domain instance
      * @param props the properties to use
      */
-    def updateProperties(o, props, boolean overrideUpdateDate = false) {
+    def updateProperties(o, props, boolean overrideUpdateDate = false) throws Exception{
         assert grailsApplication
         def domainDescriptor = grailsApplication.getArtefact(DomainClassArtefactHandler.TYPE,
                 o.getClass().name)
         props.remove('id')
         props.remove('api_key')  // don't ever let this be stored in public data
+
         // Dump data such as projects from SciStarter will want to preserve the original date not the date
         // it was imported, we have another field for it.
         !overrideUpdateDate && props.remove('lastUpdated') // in case we are loading from dumped data
@@ -40,28 +39,43 @@ class CommonService {
              * UTC time. They are converted to java dates by forcing a zero time offset so that local timezone is
              * not used. All conversions to and from local time are the responsibility of the service consumer.
              */
-            if (v instanceof String && domainDescriptor.hasProperty(k) && domainDescriptor?.getPropertyByName(k)?.getType() == Date) {
+            if (v instanceof String && domainDescriptor.hasProperty(k) && domainDescriptor?.getPropertyType(k) == Date) {
                 v = v ? parse(v) : null
             }
             if (v == "false") {
                 v = false
             }
+          //  if (v == "null" || v == JSONObject.NULL) {
+            // http://docs.grails.org/3.0.6/api/org/grails/web/json/JSONObject.Null.html
             if (v == "null") {
                 v = null
             }
-            o[k] = v
+
+            // Dynamic properties with a null value result in a NPE when using the GORM mongo codec mapping.
+            if (v != null || domainDescriptor.hasProperty(k)) {
+                o[k] = v
+            }
         }
         // always flush the update so that that any exceptions are caught before the service returns
-        o.save(flush:true,failOnError:true)
+        o.save(flush:true)
         if (o.hasErrors()) {
             log.error("has errors:")
-            o.errors.each { log.error it }
-            throw new Exception(o.errors[0] as String);
+            List messages = []
+            o.errors?.getAllErrors().each { fieldError ->
+                log.error fieldError.toString();
+                if(fieldError instanceof MessageSourceResolvable) {
+                    messages.add( messageSource.getMessage(fieldError, Locale.getDefault()))
+                } else {
+                    messages.add(fieldError.toString())
+                }
+            }
+
+            throw new Exception( messages.join(', '));
         }
     }
 
     Date parse(String dateStr) {
-        return dateFormat.parse(dateStr.replace("Z", "+0000"))
+        return DateUtil.parse(dateStr)
     }
 
     /**
@@ -70,12 +84,13 @@ class CommonService {
      * @return map of properties
      */
     def toBareMap(o) {
-        def dbo = o.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = GormMongoUtil.extractDboProperties(o.getProperty("dbo"))
+     //   def mapOfProperties = dbo.toMap()
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
         mapOfProperties.findAll {k,v -> v != null && v != ""}
+       // GormMongoUtil.deepPrune(mapOfProperties)
     }
 
     def checkApiKey(key) {
@@ -83,7 +98,7 @@ class CommonService {
         String cacheKey = 'apikey-'+key
         Map result = cacheService.get(cacheKey, {
             // try the preferred api key store first
-            def url = grailsApplication.config.security.apikey.serviceUrl + key
+            def url = grailsApplication.config.getProperty('security.apikey.serviceUrl') + key
             try {
                 def conn = new URL(url).openConnection()
                 if (conn.getResponseCode() == 200) {

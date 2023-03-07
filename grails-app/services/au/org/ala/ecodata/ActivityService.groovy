@@ -1,8 +1,9 @@
 package au.org.ala.ecodata
 import com.mongodb.BasicDBObject
-import com.mongodb.DBCursor
-import com.mongodb.DBObject
 import org.grails.datastore.mapping.query.api.BuildableCriteria
+import au.org.ala.ecodata.metadata.*
+
+import javax.persistence.PessimisticLockException
 
 import static au.org.ala.ecodata.Status.ACTIVE
 import static au.org.ala.ecodata.Status.DELETED
@@ -20,24 +21,49 @@ class ActivityService {
     SiteService siteService
     CommentService commentService
     UserService userService
+    LockService lockService
+    MetadataService metadataService
+    PermissionService permissionService
 
-    def get(id, levelOfDetail = [], version = null) {
+    def get(id, levelOfDetail = [], version = null, userId = null, hideMemberOnlyFlds = false) {
+        def activity = null
+
         if (version) {
             def all = AuditMessage.findAllByEntityIdAndEntityTypeAndDateLessThanEquals(id, Activity.class.name,
                     new Date(version as Long), [sort:'date', order:'desc', max: 1])
-            def activity = null
+
             all?.each {
                 if (it.entity.status == ACTIVE &&
                         (it.eventType == AuditEventType.Insert || it.eventType == AuditEventType.Update)) {
                     activity = toMap(it.entity, levelOfDetail, version)
                 }
             }
-
-            activity
         } else {
             def o = Activity.findByActivityIdAndStatus(id, ACTIVE)
-            o ? toMap(o, levelOfDetail) : null
+            activity = o ? toMap(o, levelOfDetail) : null
         }
+
+        if (activity == null ){
+            return [status:404 , error: 'Activity cannot be found']
+        }
+
+        // If field is flagged as visible to project members only, and the caller requested to hide its value
+        if (hideMemberOnlyFlds){
+            boolean userIsAlaAdmin = userId && permissionService.isUserAlaAdmin(userId) ? true : false
+
+            boolean userIsProjectMember = false
+            if (userId) {
+                userIsProjectMember = userIsAlaAdmin || permissionService.isUserMemberOfProject(userId, activity.projectId)
+            }
+
+            OutputModelProcessor processor = new OutputModelProcessor()
+            activity.outputs?.each { output ->
+                OutputMetadata outputModel = new OutputMetadata(metadataService.getOutputDataModelByName(output.name))
+                processor.hideMemberOnlyAttributes(output, outputModel, userIsProjectMember)
+            }
+        }
+
+        activity
     }
 
     def getAll(boolean includeDeleted = false, levelOfDetail = []) {
@@ -57,12 +83,12 @@ class ActivityService {
      */
     def doWithAllActivities(Closure action) {
         // Due to various memory & performance issues with GORM mongo plugin 1.3, this method uses the native API.
-        com.mongodb.DBCollection collection = Activity.getCollection()
-        DBObject query = new BasicDBObject('status', ACTIVE)
-        DBCursor results = collection.find(query).batchSize(100)
+        def collection = Activity.getCollection()
+        BasicDBObject query = new BasicDBObject('status', ACTIVE)
+        def results = collection.find(query).batchSize(100)
 
         results.each { dbObject ->
-            action.call(dbObject.toMap())
+            action.call(dbObject)
         }
     }
 
@@ -80,6 +106,35 @@ class ActivityService {
     def getAll(List listOfIds, levelOfDetail = []) {
         Activity.findAllByActivityIdInListAndStatus(listOfIds, ACTIVE).collect { toMap(it, levelOfDetail) }
     }
+
+    /**
+     * Get activities of given activities
+     * @param listOfIds  a list of activityId
+     * @param startDate
+     * @param endDate
+     * @param levelOfDetail
+     * @return
+     */
+    def getAll(List listOfIds, Date startDate, Date endDate, levelOfDetail = []) {
+        Activity.findAllByActivityIdInListAndStartDateGreaterThanEqualsAndEndDateLessThanEqualsAndStatus(listOfIds,startDate,endDate, ACTIVE).collect { toMap(it, levelOfDetail) }
+    }
+
+    /**
+     * Get the period of activities
+     * @param listOfIds IDs of activities
+     * @return
+     */
+    def getPeriod(List listOfIds){
+      def period = Activity.createCriteria().list {
+            projections {
+                min "plannedStartDate"
+                max "plannedEndDate"
+            }
+          inList('activityId', listOfIds)
+        }
+        return period
+    }
+
 
     def findAllForSiteId(id, levelOfDetail = [], version = null) {
         if (version) {
@@ -117,6 +172,10 @@ class ActivityService {
 
     List<Map> findAllForProjectActivityId(String projectActivityId, levelOfDetail = []) {
         Activity.findAllByProjectActivityIdAndStatus(projectActivityId, ACTIVE).collect { toMap(it, levelOfDetail) }
+    }
+
+    List<Map> findAllForActivityIdsInProjectActivity(List activityIdList, String projectActivityId, levelOfDetail = []) {
+        Activity.findAllByActivityIdInListAndProjectActivityIdAndStatus(activityIdList, projectActivityId, ACTIVE).collect { toMap(it, levelOfDetail) }
     }
 
     def findAllForUserId(userId, query, levelOfDetail = []){
@@ -185,17 +244,43 @@ class ActivityService {
     }
 
     /**
+     * Get distinct sites associated with activities in a project
+     * @param projectId Project identifier
+     * @return activity count.
+     */
+    List getDistinctSitesForProject(projectId, status = ACTIVE) {
+
+        BuildableCriteria c = Activity.createCriteria()
+        def results = c.listDistinct {
+            projections {
+                property 'siteId'
+            }
+            eq("projectId", projectId)
+            eq("status", status)
+            and{
+                ne("siteId", null)
+                ne("siteId", "")
+            }
+
+        }
+
+        new HashSet(results).toArray().toList()
+    }
+
+    /**
      * Converts the domain object into a map of properties, including
      * dynamic properties.
      * @param act an Activity instance
      * @return map of properties
      */
     def toMap(act, levelOfDetail = ['all'], version = null) {
-        def mapOfProperties = act instanceof Activity ? act.getProperty("dbo").toMap() : act
+       // def mapOfProperties = act instanceof Activity ? act.getProperty("dbo").toMap() : act
+        def mapOfProperties = act instanceof Activity ? GormMongoUtil.extractDboProperties(act.getProperty("dbo")) : act //[*:GormMongoUtil.extractDboProperties(act.getProperty("dbo"))] : act
         mapOfProperties.complete = act.complete // This is not a persistent property so is not in the dbo.
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
+
         if (levelOfDetail == SITE) {
             if (mapOfProperties.siteId) {
                 mapOfProperties.site = siteService.get(mapOfProperties.siteId, SiteService.FLAT, version)
@@ -205,9 +290,14 @@ class ActivityService {
             mapOfProperties.remove("outputs")
             mapOfProperties.outputs = outputService.findAllForActivityId(act.activityId, levelOfDetail, version)
             mapOfProperties.documents = documentService.findAllForActivityId(act.activityId, version)
+            Lock lock = lockService.get(act.activityId)
+            if (lock) {
+                mapOfProperties.lock = lock
+            }
         }
 
         mapOfProperties.findAll {k,v -> v != null}
+       // GormMongoUtil.deepPrune(mapOfProperties)
     }
 
     def loadAll(list) {
@@ -228,6 +318,7 @@ class ActivityService {
         Activity activity = new Activity(siteId: props.siteId, activityId: Identifiers.getNew(true, ''))
         try {
             activity.save(failOnError: true)
+            //activity.save(failOnError: true, flush:true)
 
             props.remove('id')
             props.remove('activityId')
@@ -315,6 +406,27 @@ class ActivityService {
     }
 
     /**
+     * Deletes an activity by marking it as not 'active'.
+     *
+     * @param id
+     * @param destroy if true will really delete the object
+     * @return
+     */
+    Map bulkDelete(List activityIds, boolean destroy = false) {
+        Map result = [ success : true]
+
+        activityIds?.each { activityId ->
+            result[activityId] = delete(activityId, destroy)
+
+            if (result[activityId]?.status != 'ok') {
+                result['success'] = false
+            }
+        }
+
+        result
+    }
+
+    /**
      * Deletes each of the outputs associated with this activity.
      * @param activityId the ID of the activity to delete.
      * @param destroy whether to perform a soft delete or hard delete.
@@ -330,10 +442,34 @@ class ActivityService {
      *
      * @param props the activity properties and the list of outputs
      * @param id the activity id
-     * @return json status
+     * @param lock if true, a lock will be checked / obtained for the duration of the update.  If the lock is already
+     * held by the user, it will not be released after the update.  If it is held by another user the update will
+     * not occur and an error will be returned
+     * @return Map containing either status:'ok' for a successful result or status:'error' for a failure.
      */
-    def update(props, id) {
-        //log.debug "props = ${props}"
+    Map update(props, String id, boolean lock = false) {
+
+        Map result
+        if (lock) {
+            try {
+                result = lockService.executeWithLock(id) {
+                    doUpdate(props, id)
+                }
+            }
+            catch (PessimisticLockException e) {
+                result = [status:'error', error:"The activity is being updated by another user"]
+            }
+            return result
+
+        }
+        else {
+            result = doUpdate(props, id)
+        }
+
+        result
+    }
+
+    private Map doUpdate(props, String id) {
         def activity = Activity.findByActivityId(id)
         def errors = []
         if (activity) {
@@ -353,10 +489,18 @@ class ActivityService {
                         deleteActivityOutputs(id)
                     }
                     commonService.updateProperties(activity, props)
+
+                    // If the activity has been updated to a state where Outputs are not supported, delete any
+                    // existing outputs.  This is to handle the case where an activity with output data is
+                    // cancelled or deferred.
+                    if (!activity.supportsOutputs()) {
+                        deleteActivityOutputs(id)
+                    }
+
                 } catch (Exception e) {
                     Activity.withSession { session -> session.clear() }
                     def error = "Error updating Activity ${id} - ${e.message}"
-                    log.error ( error, e) //You have to hate exeption hiding
+                    log.error(error, e) //You have to hate exeption hiding
                     errors << [error: error, name: 'activity']
                 }
             }
@@ -384,14 +528,14 @@ class ActivityService {
             }
             // aggregate errors
             if (errors) {
-                return [status:'error', errorList: errors]
+                return [status: 'error', errorList: errors]
             } else {
-                return [status:'ok']
+                return [status: 'ok']
             }
         } else {
             def error = "Error updating Activity - no such id ${id}"
             log.error error
-            return [status:'error',error:error]
+            return [status: 'error', error: error]
         }
     }
 
@@ -431,8 +575,8 @@ class ActivityService {
      * @return map of properties
      */
     def toLiteMap(act) {
-        def dbo = act.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = act.getProperty("dbo")
+       // def mapOfProperties = dbo.toMap()
         [activityId: mapOfProperties.activityId,
                 siteId: mapOfProperties.siteId,
                 type: mapOfProperties.type,
@@ -458,19 +602,24 @@ class ActivityService {
      * @param startDate if supplied will constrain the returned activities to those with 'dateProperty' on or after this date.
      * @param endDate if supplied will constrain the returned activities to those with 'dateProperty' before this date.
      * @param dateProperty the property to use for the date range. (plannedStartDate, plannedEndDate, startDate, endDate)
+     * @param options add pagination and sort options like max, offset, sort and order
      * @return a listbuilof the activities that match the supplied criteria
      */
-    public search(Map searchCriteria, Date startDate, Date endDate, String dateProperty, levelOfDetail = []) {
+    public search(Map searchCriteria, Date startDate, Date endDate, String dateProperty, levelOfDetail = [], options = [:]) {
 
+        def activities = searchAndListActivityDomainObjects(searchCriteria, dateProperty, startDate, endDate, options)
+        activities.collect{toMap(it, levelOfDetail)}
+    }
+
+    public List searchAndListActivityDomainObjects(searchCriteria, String dateProperty, Date startDate, Date endDate, options) {
         def criteria = Activity.createCriteria()
-        def activities = criteria.list {
+        Closure action = {
             ne("status", "deleted")
-            searchCriteria.each { prop,value ->
+            searchCriteria.each { prop, value ->
 
                 if (value instanceof List) {
                     inList(prop, value)
-                }
-                else {
+                } else {
                     eq(prop, value)
                 }
             }
@@ -481,10 +630,8 @@ class ActivityService {
             if (dateProperty && endDate) {
                 lt(dateProperty, endDate)
             }
-
-
         }
-        activities.collect{toMap(it, levelOfDetail)}
+        options ? criteria.list(options, action) : criteria.list(action)
     }
 
     def getAllActivityIdsForProjectActivity(String pActivityId) {

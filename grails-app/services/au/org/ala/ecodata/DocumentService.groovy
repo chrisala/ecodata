@@ -1,15 +1,14 @@
 package au.org.ala.ecodata
+
 import com.itextpdf.text.PageSize
 import com.itextpdf.text.html.simpleparser.HTMLWorker
 import com.itextpdf.text.pdf.PdfWriter
+import grails.core.GrailsApplication
+import groovy.json.JsonSlurper
 import org.apache.commons.io.FileUtils
-import org.apache.commons.io.FilenameUtils
 import org.apache.commons.io.IOUtils
 import org.grails.datastore.mapping.query.api.BuildableCriteria
-import org.imgscalr.Scalr
 
-import javax.imageio.ImageIO
-import java.awt.image.BufferedImage
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 
@@ -18,6 +17,7 @@ import static au.org.ala.ecodata.Status.DELETED
 
 class DocumentService {
 
+    static final FLAT = 'flat'
     static final LINKTYPE = "link"
     static final LOGO = 'logo'
     static final FILE_LOCK = new Object()
@@ -28,8 +28,10 @@ class DocumentService {
                                      "iTunes",
                                      "windowsPhone"]
 
-    def commonService, grailsApplication, activityService
-    
+    CommonService commonService
+    GrailsApplication grailsApplication
+    ActivityService activityService
+
     /**
      * Converts the domain object into a map of properties, including
      * dynamic properties.
@@ -37,8 +39,8 @@ class DocumentService {
      * @param levelOfDetail list of features to include
      * @return map of properties
      */
-    def toMap(document, levelOfDetail = []) {
-        def mapOfProperties = document instanceof Document ? document.getProperty("dbo").toMap() : document
+    def toMap(Document document, levelOfDetail = []) {
+        def mapOfProperties = document instanceof Document ? GormMongoUtil.extractDboProperties(document.getProperty("dbo")) : document
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
@@ -47,11 +49,17 @@ class DocumentService {
         if (document?.type == Document.DOCUMENT_TYPE_IMAGE) {
             mapOfProperties.thumbnailUrl = document.thumbnailUrl
         }
+        mapOfProperties.publiclyViewable = document.isPubliclyViewable()
         mapOfProperties.findAll {k,v -> v != null}
     }
 
     def get(id, levelOfDetail = []) {
         def o = Document.findByDocumentIdAndStatus(id, ACTIVE)
+        return o ? toMap(o, levelOfDetail) : null
+    }
+
+    def getByStatus(id, levelOfDetail = []) {
+        def o = Document.findByDocumentId(id)
         return o ? toMap(o, levelOfDetail) : null
     }
 
@@ -164,11 +172,17 @@ class DocumentService {
         Document.findAllByProjectActivityIdAndStatus(id, ACTIVE).collect { toMap(it, levelOfDetail) }
     }
 
-    String findImageUrlForProjectId(id, levelOfDetail = []){
+    String findImageUrlForProjectId(id, boolean isThumbnail = true){
         Document primaryImageDoc;
         Document logoDoc = Document.findByProjectIdAndRoleAndStatus(id, LOGO, ACTIVE);
         String urlImage;
-        urlImage = logoDoc?.url ? logoDoc.getThumbnailUrl() : ''
+        urlImage = logoDoc?.url
+        if (urlImage) {
+            if (isThumbnail) {
+                urlImage = logoDoc.getThumbnailUrl()
+            }
+        }
+
         if(!urlImage){
             primaryImageDoc = Document.findByProjectIdAndIsPrimaryProjectImage(id, true)
             urlImage = primaryImageDoc?.url;
@@ -230,13 +244,15 @@ class DocumentService {
 					props.filename = saveAsPDF(fileIn, partition, props.filename,false)
 				}
 				else {
-                    props.filename = saveFile(partition, props.filename, fileIn, false)
-                    if (props.type == Document.DOCUMENT_TYPE_IMAGE) {
-                        makeThumbnail(partition, props.filename)
-                    }
+                    props.filename = saveFile(partition, props.filename, fileIn, false, props.type)
                 }
                 props.filepath = partition
             }
+
+            if (props.activityId) {
+                props.reportId = Report.findByActivityId(props.activityId)?.reportId
+            }
+
             commonService.updateProperties(d, props)
             return [status:'ok',documentId:d.documentId, url:d.url]
         } catch (Exception e) {
@@ -261,7 +277,7 @@ class DocumentService {
         if (d) {
             try {
                 if (fileIn) {
-                    props.filename = saveFile(d.filepath, props.filename, fileIn, true)
+                    props.filename = saveFile(d.filepath, props.filename, fileIn, true, d.type)
                 }
                 props.remove('url')
                 props.remove('thumbnailUrl')
@@ -287,13 +303,14 @@ class DocumentService {
      * @param filename the name to save the file.
      * @param fileIn an InputStream containing the contents of the file to save.
      * @param overwrite true if an existing file should be overwritten.
+     * @param type the type of file being saved (image types will have thumbnails created after saving)
      * @return the filename (not the full path) the file was saved using.  This may not be the same as the supplied
      * filename in the case that overwrite is false.
      */
-    private String saveFile(filepath, filename, fileIn, overwrite) {
+    private String saveFile(String filepath, String filename, InputStream fileIn, boolean overwrite, String type = null) {
         if (fileIn) {
             synchronized (FILE_LOCK) {
-                //create upload dir if it doesnt exist...
+                //create upload dir if it doesn't exist...
                 def uploadDir = new File(fullPath(filepath, ''))
 
                 if(!uploadDir.exists()){
@@ -303,10 +320,29 @@ class DocumentService {
                 if (!overwrite) {
                     filename = nextUniqueFileName(filepath, filename)
                 }
-                new FileOutputStream(fullPath(filepath, filename)).withStream { it << fileIn }
+
+                File destination = new File(fullPath(filepath, filename))
+                new FileOutputStream(destination).withStream { it << fileIn }
+
+                if (type == Document.DOCUMENT_TYPE_IMAGE) {
+
+                    filename = processImage(filepath, filename, destination, overwrite)
+                }
             }
         }
         return filename
+    }
+
+    private String processImage(String filepath, String filename, File destination, boolean overwrite) {
+        File processed = new File(fullPath(filepath, Document.PROCESSED_PREFIX + filename))
+        boolean result = ImageUtils.reorientImage(destination, processed)
+        if (result) {
+            // If the image was processed, used the processed image when making the thumbnail.
+            filename = Document.PROCESSED_PREFIX + filename
+        }
+
+        makeThumbnail(filepath, filename, overwrite)
+        filename
     }
 
     /**
@@ -316,7 +352,7 @@ class DocumentService {
      *
      * @return The thumbnail file or null for no thumbnail
      */
-    def makeThumbnail(filepath, filename, overwrite = true) {
+    File makeThumbnail(filepath, filename, overwrite = true) {
         File sFile = new File(fullPath(filepath, filename))
         if (!sFile.exists())
             return null
@@ -327,22 +363,11 @@ class DocumentService {
                 return tnFile
             }
             else {
-                tnFile.delete();
+                tnFile.delete()
             }
         }
 
-        def ext = FilenameUtils.getExtension(filename)
-        BufferedImage img = ImageIO.read(sFile)
-        BufferedImage tn = Scalr.resize(img, 300, Scalr.OP_ANTIALIAS)
-        try {
-            def success = ImageIO.write(tn, ext, tnFile)
-            log.debug "Thumbnailing: " + success
-            return tnFile
-        } catch(IOException e) {
-            log.error("Write error for " + tnFile.getPath() + ": " + e.getMessage(), e)
-            return null
-        }
-
+        return ImageUtils.makeThumbnail(sFile, tnFile, 300)
     }
 
 	/**
@@ -366,7 +391,7 @@ class DocumentService {
 				filename = nextUniqueFileName(filepath, filename)
 			}
 			OutputStream file = new FileOutputStream(new File(fullPath(filepath, filename)));
-			
+
 			//supply outputstream to itext to write the PDF data,
 			com.itextpdf.text.Document document = new com.itextpdf.text.Document();
 			document.setPageSize(PageSize.LETTER.rotate());
@@ -379,11 +404,11 @@ class DocumentService {
 			document.close();
 			file.close();
 			return filename
-			
+
 		}
-		
+
 	}
-			
+
     /**
      * We are preserving the file name so the URLs look nicer and the file extension isn't lost.
      * As filename are not guaranteed to be unique, we are pre-pending the file with a counter if necessary to
@@ -399,12 +424,30 @@ class DocumentService {
         return newFilename;
     }
 
-    String fullPath(String filepath, String filename) {
+    /**
+     * Returns the path the document by combining the path and filename with the directory where documents
+     * are uploaded.
+     * Optionally uses the canonical form of the uploads directory to assist validation.
+     */
+    String fullPath(String filepath, String filename, boolean useCanonicalFormOfUploadPath = false) {
         String path = filepath ?: ''
         if (path) {
             path = path+File.separator
         }
-        return grailsApplication.config.app.file.upload.path + '/' + path  + filename
+        String uploadPath = grailsApplication.config.getProperty('app.file.upload.path')
+        if (useCanonicalFormOfUploadPath) {
+            uploadPath = new File(uploadPath).getCanonicalPath()
+        }
+        return uploadPath + File.separator + path  + filename
+    }
+
+    /**
+     * This method compares the canonical path to a document with the path potentially supplied by the
+     * user and returns false if they don't match.  This is to prevent attempts at file system traversal.
+     */
+    boolean validateDocumentFilePath(String path, String filename) {
+        String file = fullPath(path, filename, true)
+        new File(file).getCanonicalPath() == file
     }
 
     void deleteAllForProject(String projectId, boolean destroy = false) {
@@ -460,7 +503,7 @@ class DocumentService {
         File fileToArchive = new File(fullPath(document.filepath, document.filename))
 
         if (fileToArchive.exists()) {
-            File archiveDir = new File("${grailsApplication.config.app.file.archive.path}/${document.filepath}")
+            File archiveDir = new File("${grailsApplication.config.getProperty('app.file.archive.path')}/${document.filepath}")
             // This overwrites an archived file with the same name.
             FileUtils.copyFileToDirectory(fileToArchive, archiveDir)
             FileUtils.deleteQuietly(fileToArchive)
@@ -520,4 +563,34 @@ class DocumentService {
         doc
     }
 
+    /**
+     * Reads the contents of a file associated with a Document and return content as JSON
+     */
+    def readJsonDocument(Map document) {
+        String fullPath = this.fullPath(document.filepath, document.filename)
+        File file = new File(fullPath)
+
+        if (!file.exists()) {
+            return  [error: fullPath + ' does not exist!']
+        }
+        def jsonSlurper = new JsonSlurper()
+        def data = jsonSlurper.parse(file)
+        return data
+    }
+
+    void doWithAllDocuments(Closure action) {
+        def offset = 0
+        def batchSize = 100
+
+        def count = batchSize // For first loop iteration
+        while (count == batchSize) {
+            List documents = Document.findAllByStatus('active', [offset: offset, max: batchSize]).collect {
+                action.call(toMap(it))
+            }
+
+            count = documents.size()
+            offset += batchSize
+            Document.withSession { session -> session.clear() }
+        }
+    }
 }

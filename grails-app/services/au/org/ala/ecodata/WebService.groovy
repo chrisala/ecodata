@@ -16,8 +16,8 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.converters.exceptions.ConverterException
-import org.codehaus.groovy.grails.web.servlet.HttpHeaders
+import org.grails.web.converters.exceptions.ConverterException
+import grails.web.http.HttpHeaders
 import org.springframework.http.MediaType
 
 import javax.servlet.http.HttpServletResponse
@@ -40,32 +40,50 @@ class WebService {
             return responseText(conn)
         } catch (SocketTimeoutException e) {
             def error = [error: "Timed out calling web service. URL= ${url}."]
-            log.error error
+            log.error error.toString(), e
             return error
         } catch (Exception e) {
             def error = [error: "Failed calling web service. ${e.getClass()} ${e.getMessage()} URL= ${url}.",
                     statusCode: conn?.responseCode?:"",
                     detail: conn?.errorStream?.text]
-            log.error error, e
+            log.error error.toString(), e
+            return error
+        }
+    }
+
+    def getStream(String url, boolean includeUserId) {
+        def conn = null
+        try {
+            conn = configureConnection(url, includeUserId)
+            return conn.inputStream
+        } catch (SocketTimeoutException e) {
+            def error = [error: "Timed out calling web service. URL= ${url}."]
+            log.error error.toString(), e
+            return error
+        } catch (Exception e) {
+            def error = [error: "Failed calling web service. ${e.getClass()} ${e.getMessage()} URL= ${url}.",
+                         statusCode: conn?.responseCode?:"",
+                         detail: conn?.errorStream?.text]
+            log.error error.toString(), e
             return error
         }
     }
 
     private int defaultTimeout() {
-        grailsApplication.config.webservice.readTimeout as int
+        grailsApplication.config.getProperty('webservice.readTimeout', Integer)
     }
 
     private URLConnection configureConnection(String url, boolean includeUserId, Integer timeout = null) {
         URLConnection conn = new URL(url).openConnection()
 
         def readTimeout = timeout?:defaultTimeout()
-        conn.setConnectTimeout(grailsApplication.config.webservice.connectTimeout as int)
+        conn.setConnectTimeout(grailsApplication.config.getProperty('webservice.connectTimeout', Integer))
         conn.setReadTimeout(readTimeout)
 
         if (includeUserId) {
-            def user = getUserService().getUser()
+            def user = getUserService().currentUser()
             if (user) {
-                conn.setRequestProperty(grailsApplication.config.app.http.header.userId, user.userId)
+                conn.setRequestProperty(grailsApplication.config.getProperty('app.http.header.userId'), user.userId)
             }
 
         }
@@ -76,14 +94,13 @@ class WebService {
      * Proxies a request URL but doesn't assume the response is text based. (Used for proxying requests to
      * ecodata for excel-based reports)
      */
-    def proxyGetRequest(HttpServletResponse response, String url, boolean includeUserId = true, boolean includeApiKey = false) {
+    def proxyGetRequest(HttpServletResponse response, String url, boolean includeUserId = true, boolean includeApiKey = false, List headers = [HttpHeaders.CONTENT_DISPOSITION], int readTimeout) {
 
-        HttpURLConnection conn = configureConnection(url, includeUserId)
+        HttpURLConnection conn = configureConnection(url, includeUserId, readTimeout)
         if (includeApiKey) {
-            conn.setRequestProperty("Authorization", grailsApplication.config.api_key);
+            conn.setRequestProperty("Authorization", grailsApplication.config.getProperty('api_key'));
         }
 
-        def headers = [HttpHeaders.CONTENT_DISPOSITION]
         response.setContentType(conn.getContentType())
         response.setContentLength(conn.getContentLength())
 
@@ -100,31 +117,37 @@ class WebService {
     }
 
 
-    def getJson(String url, Integer timeout = null) {
+    def getJson(String url, Integer timeout = null, Map headers = null) {
         def conn = null
         try {
             conn = configureConnection(url, false, timeout)
+            if (headers) {
+                headers.each {key, value  ->
+                    conn.setRequestProperty(key, value)
+                }
+            }
+
             def json = responseText(conn)
             return JSON.parse(json)
         } catch (ConverterException e) {
             def error = ['error': "Failed to parse json. ${e.getClass()} ${e.getMessage()} URL= ${url}."]
-            log.error error
+            log.error error.toString(), e
             return error
         } catch (SocketTimeoutException e) {
             def error = [error: "Timed out getting json. URL= ${url}."]
-            println error
+            log.error error.toString(), e
             return error
         } catch (ConnectException ce) {
             log.info "Exception class = ${ce.getClass().name} - ${ce.getMessage()}"
             def error = [error: "ecodata service not available. URL= ${url}."]
-            println error
+            log.error error.toString(), e
             return error
         } catch (Exception e) {
             log.info "Exception class = ${e.getClass().name} - ${e.getMessage()}"
             def error = [error: "Failed to get json from web service. ${e.getClass()} ${e.getMessage()} URL= ${url}.",
                          statusCode: conn?.responseCode?:"",
                          detail: conn?.errorStream?.text]
-            log.error error
+            log.error error.toString(), e
             return error
         }
     }
@@ -146,11 +169,11 @@ class WebService {
      */
     def responseText(urlConnection) {
 
-        def charset = 'UTF-8' // default
+        String charset = 'UTF-8' // default
         def contentType = urlConnection.getContentType()
         if (contentType) {
-            def mediaType = MediaType.parseMediaType(contentType)
-            charset = (mediaType.charSet)?mediaType.charSet.toString():'UTF-8'
+            MediaType mediaType = MediaType.parseMediaType(contentType)
+            charset = (mediaType.charset)?mediaType.charset.toString():'UTF-8'
         }
         return urlConnection.content.getText(charset)
     }
@@ -161,7 +184,7 @@ class WebService {
      * @param params
      * @return the contents of the response as a map
      */
-    Map doPostWithParams(String url, Map params) {
+    Map doPostWithParams(String url, Map params, boolean suppressLog = false) {
         def conn = null
         def charEncoding = 'utf-8'
         try {
@@ -185,13 +208,18 @@ class WebService {
             return [resp: JSON.parse(resp?:"{}")]
         } catch (SocketTimeoutException e) {
             def error = [error: "Timed out calling web service. URL= ${url}."]
-            log.error(error, e)
+            if (!suppressLog) {
+                log.error(error.toString(), e)
+            }
+
             return error
         } catch (Exception e) {
             def error = [error: "Failed calling web service. ${e.getMessage()} URL= ${url}.",
                          statusCode: conn?.responseCode?:"",
                          detail: conn?.errorStream?.text]
-            log.error(error, e)
+            if (!suppressLog) {
+                log.error(error.toString(), e)
+            }
             return error
         }
     }
@@ -204,11 +232,11 @@ class WebService {
             conn.setRequestMethod("POST")
             conn.setDoOutput(true)
             conn.setRequestProperty("Content-Type", "application/json;charset=${charEncoding}");
-            conn.setRequestProperty("Authorization", "${grailsApplication.config.api_key}");
+            conn.setRequestProperty("Authorization", "${grailsApplication.config.getProperty('api_key')}");
 
             def user = getUserService().getCurrentUserDetails()
             if (user && user.userId) {
-                conn.setRequestProperty(grailsApplication.config.app.http.header.userId, user.userId)
+                conn.setRequestProperty(grailsApplication.config.getProperty('app.http.header.userId'), user.userId)
                 conn.setRequestProperty("Cookie", "ALA-Auth="+java.net.URLEncoder.encode(user.userName, charEncoding))
             }
             OutputStreamWriter wr = new OutputStreamWriter(conn.getOutputStream(), charEncoding)
@@ -219,18 +247,18 @@ class WebService {
             return [resp: JSON.parse(resp?:"{}"), headers: conn.getHeaderFields()] // fail over to empty json object if empty response string otherwise JSON.parse fails
         } catch (SocketTimeoutException e) {
             def error = [error: "Timed out calling web service. URL= ${url}."]
-            log.error(error, e)
+            log.error(error.toString(), e)
             return error
         } catch (Exception e) {
             def error = [error: "Failed calling web service. ${e.getMessage()} URL= ${url}.",
                     statusCode: conn?.responseCode?:"",
                     detail: conn?.errorStream?.text]
-            log.error(error, e)
+            log.error(error.toString(), e)
             return error
         }
     }
 
-    Map doPost(String url, String postBody, boolean includeAuthKey = true) {
+    Map doPost(String url, String postBody, boolean includeAuthKey = true, Map headers = null, boolean addALACookie = true) {
         HttpURLConnection conn = null
         def charEncoding = 'utf-8'
         try {
@@ -239,15 +267,24 @@ class WebService {
             conn.setDoOutput(true)
             conn.setRequestProperty("Content-Type", "text/plain;charset=${charEncoding}");
             if (includeAuthKey) {
-                conn.setRequestProperty("Authorization", "${grailsApplication.config.api_key}");
+                conn.setRequestProperty("Authorization", "${grailsApplication.config.getProperty('api_key')}");
 
             }
 
-            def user = getUserService().getCurrentUserDetails()
-            if (user && user.userId) {
-                conn.setRequestProperty(grailsApplication.config.app.http.header.userId, user.userId)
-                conn.setRequestProperty("Cookie", "ALA-Auth="+java.net.URLEncoder.encode(user.userName, charEncoding))
+            if (addALACookie) {
+                def user = getUserService().getCurrentUserDetails()
+                if (user && user.userId) {
+                    conn.setRequestProperty(grailsApplication.config.getProperty('app.http.header.userId'), user.userId)
+                    conn.setRequestProperty("Cookie", "ALA-Auth=" + java.net.URLEncoder.encode(user.userName, charEncoding))
+                }
             }
+
+            if (headers) {
+                headers.each {key, value  ->
+                    conn.setRequestProperty(key, value)
+                }
+            }
+
             OutputStreamWriter wr = new OutputStreamWriter(conn.getOutputStream(), charEncoding)
             wr.write(postBody)
             wr.flush()
@@ -256,28 +293,50 @@ class WebService {
             return [resp: JSON.parse(resp?:"{}"), headers: conn.getHeaderFields()] // fail over to empty json object if empty response string otherwise JSON.parse fails
         } catch (SocketTimeoutException e) {
             def error = [error: "Timed out calling web service. URL= ${url}."]
-            log.error(error, e)
+            log.error(error.toString(), e)
             return error
         } catch (Exception e) {
             def error = [error: "Failed calling web service. ${e.getMessage()} URL= ${url}.",
                          statusCode: conn?.responseCode?:"",
                          detail: conn?.errorStream?.text]
-            log.error(error, e)
+            log.error(error.toString(), e)
             return error
         }
     }
 
     def doDelete(String url) {
-        url += (url.indexOf('?') == -1 ? '?' : '&') + "api_key=${grailsApplication.config.api_key}"
+        url += (url.indexOf('?') == -1 ? '?' : '&') + "api_key=${grailsApplication.config.getProperty('api_key')}"
         def conn = null
         try {
             conn = new URL(url).openConnection()
             conn.setRequestMethod("DELETE")
-            conn.setRequestProperty("Authorization", grailsApplication.config.api_key);
+            conn.setRequestProperty("Authorization", grailsApplication.config.getProperty('api_key'));
             def user = getUserService().getUser()
             if (user) {
-                conn.setRequestProperty(grailsApplication.config.app.http.header.userId, user.userId)
+                conn.setRequestProperty(grailsApplication.config.getProperty('app.http.header.userId'), user.userId)
             }
+            return conn.getResponseCode()
+        } catch(Exception e){
+            println e.message
+            return 500
+        } finally {
+            if (conn != null){
+                conn?.disconnect()
+            }
+        }
+    }
+
+    def doDelete(String url, Map headers) {
+        def conn = null
+        try {
+            conn = new URL(url).openConnection()
+            conn.setRequestMethod("DELETE")
+            if(headers) {
+                headers.each {key, value  ->
+                    conn.setRequestProperty(key, value)
+                }
+            }
+
             return conn.getResponseCode()
         } catch(Exception e){
             println e.message

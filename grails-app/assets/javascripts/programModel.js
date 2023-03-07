@@ -14,6 +14,9 @@ var ProgramModel = function (prg, model) {
     self.projectDatesContracted = ko.observable(prg.projectDatesContracted);
     self.optionalProjectContent = ko.observableArray(prg.optionalProjectContent || []);
     self.weekDaysToCompleteReport = ko.observable(prg.weekDaysToCompleteReport);
+    self.reportNamePrefix = ko.observable(prg.reportNamePrefix);
+    self.projectTemplate = ko.observable(prg.projectTemplate);
+    self.activityNavigationMode = ko.observable(prg.activityNavigationMode);
     self.activities = ko.observableArray(prg.activities?prg.activities:[]);
     self.speciesFieldsSettings = ko.observable().extend({jsonText:prg.speciesFieldsSettings});
     self.select = function () {
@@ -51,6 +54,8 @@ var SubprogramModel = function (subProgram, programModel, model) {
     self.endDate = ko.observable(subProgram.endDate).extend({simpleDate:false});
     self.optionalProjectContent = ko.observableArray(subProgram.optionalProjectContent || []);
     self.weekDaysToCompleteReport = ko.observable(subProgram.weekDaysToCompleteReport);
+    self.projectTemplate = ko.observable(subProgram.projectTemplate);
+    self.activityNavigationMode = ko.observable(subProgram.activityNavigationMode);
 
     self.themes = ko.observableArray($.map(subProgram.themes, function (obj) {
         return new ThemeModel(obj, model);
@@ -92,6 +97,8 @@ var SubprogramModel = function (subProgram, programModel, model) {
             self.reportingPeriodAlignedToCalendar(undefined);
             self.projectDatesContracted(undefined);
             self.activities([]);
+            self.projectTemplate(undefined);
+            self.activityNavigationMode(undefined);
         }
         else {
             self.optionalProjectContent(programModel.optionalProjectContent() || []);
@@ -100,6 +107,8 @@ var SubprogramModel = function (subProgram, programModel, model) {
             self.reportingPeriodAlignedToCalendar(programModel.reportingPeriodAlignedToCalendar());
             self.projectDatesContracted(programModel.projectDatesContracted());
             self.activities(programModel.activities() ? programModel.activities().slice() : []);
+            self.projectTemplate(programModel.projectTemplate());
+            self.activityNavigationMode(programModel.activityNavigationMode());
         }
     });
     self.toJSON = function() {
@@ -191,7 +200,7 @@ var ProgramModelViewModel = function (model, activityTypes, options) {
         delete model.transients;
         $.ajax(config.updateProgramsModelUrl, {
             type: 'POST',
-            data: vkbeautify.json(model,2),
+            data: JSON.stringify(model, null, 2),
             contentType: 'application/json',
             success: function (data) {
                 if (data !== 'error') {

@@ -1,0 +1,325 @@
+{
+    "dataModel": [{
+        "columns": [
+            {
+                "dataType": "text",
+                "name": "newOrRevised",
+                "description": "",
+                "constraints": [
+                    "New plan",
+                    "Revised plan"
+                ],
+                "validate": "required"
+            },
+            {
+                "dataType": "text",
+                "name": "managementPlanType",
+                "description": "",
+                "constraints": [
+                    "Fire management plan",
+                    "Catchment plan",
+                    "Farm management plan",
+                    "Implementation works design",
+                    "Marine protection plan",
+                    "Project arrangements and governance",
+                    "Project plan",
+                    "Ramsar management plan",
+                    "Recovery plan",
+                    "Regional plan",
+                    "Resource management plan",
+                    "Site development plan",
+                    "Site management plan",
+                    "Other"
+                ],
+                "validate": "required"
+            },
+            {
+                "dataType": "text",
+                "name": "otherManagementPlanType",
+                "description": "",
+                "behaviour": [{
+                    "condition": "managementPlanType == \"Other\"",
+                    "type": "visible"
+                }],
+                "validate": "required,maxSize[300]"
+            },
+            {
+                "dataType": "number",
+                "name": "numberOfPlansDeveloped",
+                "validate": "required,min[0]"
+            },
+            {
+                "dataType": "feature",
+                "name": "sitesCoveredByPlan"
+            },
+            {
+                "defaultValue": {
+                    "type": "computed",
+                    "expression": "$geom.areaHa(sitesCoveredByPlan)"
+                },
+                "units": "ha",
+                "dataType": "number",
+                "name": "calculatedAreaHa"
+            },
+            {
+                "dataType": "document",
+                "name": "extraMappingDetails",
+                "validate": "required",
+                "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                "behaviour": [
+                    {
+                        "condition": "not within(areaCoveredByPlanHa, calculatedAreaHa, 0.1) or (roundTo(areaCoveredByPlanHa, 2) != roundTo(areaInvoicedHa, 2))",
+                        "type": "visible"
+                    }
+                ]
+            },
+            {
+                "units": "ha",
+                "defaultValue": {
+                    "type": "computed",
+                    "expression": "$geom.areaHa(sitesCoveredByPlan)"
+                },
+                "dataType": "number",
+                "name": "areaCoveredByPlanHa",
+                "validate": "required,min[0]"
+            },
+            {
+                "dataType": "text",
+                "name": "mappingNotAlignedReason",
+                "constraints": [
+                    "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                    "Other"
+                ],
+                "validate": "required",
+                "behaviour": [
+                    {
+                        "condition": "not within(areaCoveredByPlanHa, calculatedAreaHa, 0.1)",
+                        "type": "visible"
+                    }
+                ]
+            },
+            {
+                "dataType": "text",
+                "name": "mappingNotAlignedComments",
+                "validate": "required,maxSize[300]",
+                "behaviour": [
+                    {
+                        "type": "visible",
+                        "condition": "\"Other\" == mappingNotAlignedReason"
+                    }]
+            },
+            {
+                "dataType": "number",
+                "units": "ha",
+                "name": "areaInvoicedHa",
+                "validate": [
+                    {
+                        "rule": "min[0]"
+                    },
+                    {
+                        "rule": "max",
+                        "param": {
+                            "type": "computed",
+                            "expression": "areaCoveredByPlanHa"
+                        }
+                    }
+                ]
+            },
+            {
+                "dataType": "text",
+                "name": "invoicedNotActualReason",
+                "constraints": [
+                    "Work was undertaken over a greater area than will be invoiced for",
+                    "Other"
+                ],
+                "validate": "required",
+                "behaviour": [
+                    {
+                        "condition": "roundTo(areaCoveredByPlanHa, 2) != roundTo(areaInvoicedHa, 2)",
+                        "type": "visible"
+                    }
+                ]
+            },
+            {
+                "dataType": "text",
+                "name": "invoicedNotActualComments",
+                "behaviour": [
+                    {
+                        "type": "visible",
+                        "condition": "\"Other\" == invoicedNotActualReason"
+                    }],
+                "validate": "required,maxSize[300]"
+            },
+            {
+                "dataType": "text",
+                "name": "speciesOrTECCoveredByPlan",
+                "description": "This free text field allows multiple species and/or TECs to be entered. For Species: Use Scientific names with (common name in brackets), TECs should be written as listed in EPBC. Species or TECs should be separated by commas.",
+                "validate": "required,maxSize[300]"
+            }
+        ],
+        "dataType": "list",
+        "name": "managementPlans"
+    }],
+    "modelName": "RLP - Management plan development",
+    "title": "Developing farm / project / site management plan",
+    "viewModel": [{
+        "type": "section",
+        "items": [{
+            "columns": [
+                {
+                    "width": "10%",
+                    "source": "newOrRevised",
+                    "title": "Are these plans new or revised?",
+                    "type": "selectOne"
+                },
+                {
+                    "type": "col",
+                    "items": [
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "source": "managementPlanType",
+                                    "type": "select2"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "source": "otherManagementPlanType",
+                                    "placeholder": "Type of plan (if Other)",
+                                    "type": "textarea"
+                                }
+                            ]
+
+                        }
+                    ],
+                    "title": "Type of plan",
+                    "width": "20%"
+
+                },
+                {
+                    "width": "6%",
+                    "source": "numberOfPlansDeveloped",
+                    "title": "Number of plans developed",
+                    "type": "number"
+                },
+                {
+                    "type": "col",
+                    "items": [
+                        {
+                            "type": "feature",
+                            "source": "sitesCoveredByPlan"
+                        },
+                        {
+                            "source": "calculatedAreaHa",
+                            "type": "number",
+                            "readonly": "readonly",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Please attach mapping details",
+                                    "source": "extraMappingDetails",
+                                    "type": "document"
+                                }
+                            ]
+                        }
+                    ],
+                    "width": "10%",
+                    "title": "Sites/s covered by plan/s"
+                },
+                {
+                    "width": "17%",
+                    "title": "Actual area (ha) covered by plan/s",
+                    "type": "col",
+                    "items": [
+                        {
+                            "source": "areaCoveredByPlanHa",
+                            "type": "number",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Reason for actual being different to mapped amount",
+                                    "source": "mappingNotAlignedReason",
+                                    "type": "selectOne"
+
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                    "source": "mappingNotAlignedComments",
+                                    "type": "textarea",
+                                    "rows": 5
+                                }
+
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "width": "17%",
+                    "type": "col",
+                    "title": "Invoiced area (ha) covered by the plan",
+                    "helpText": "Enter the amount you will invoice for during this reporting period.",
+                    "items": [
+                        {
+                            "source": "areaInvoicedHa",
+                            "type": "number",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Reason for invoiced amount being different to actual amount",
+                                    "source": "invoicedNotActualReason",
+                                    "type": "selectOne"
+
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                    "source": "invoicedNotActualComments",
+                                    "type": "textarea",
+                                    "rows": 5
+
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "width": "20%",
+                    "source": "speciesOrTECCoveredByPlan",
+                    "type": "textarea",
+                    "title": "Species and/or Threatened ecological communities covered in plan"
+                }
+            ],
+            "userAddedRows": true,
+            "source": "managementPlans",
+            "type": "table"
+        }]
+    }]
+}

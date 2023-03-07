@@ -3,46 +3,15 @@
 
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
-    <meta name="app.version" content="${g.meta(name: 'app.version')}"/>
-    <meta name="app.build" content="${g.meta(name: 'app.build')}"/>
+    <meta name="app.version" content="${g.meta(name: 'info.app.version')}"/>
+    <meta name="app.commit.id" content="${ec.gitProperty(name: 'git.commit.id')}"/>
+    <meta name="app.build.time" content="${ec.buildProperty(name: 'build.time')}"/>
     <meta name="description" content="Atlas of Living Australia"/>
     <meta name="author" content="Atlas of Living Australia">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title><g:layoutTitle/></title>
-    <style type="text/css">
 
-    .icon-chevron-right {
-        float: right;
-        margin-top: 2px;
-        margin-right: -6px;
-        opacity: .25;
-    }
-
-    /* Pagination fix */
-    .pagination .disabled, .pagination .currentStep, .pagination .step {
-        float: left;
-        padding: 0 14px;
-        border-right: 1px solid;
-        line-height: 34px;
-        border-right-color: rgba(0, 0, 0, 0.15);
-    }
-
-    .pagination .prevLink {
-        border-right: 1px solid #DDD !important;
-        line-height: 34px;
-        vertical-align: middle;
-        padding: 0 14px;
-        float: left;
-    }
-
-    .pagination .nextLink {
-        vertical-align: middle;
-        line-height: 34px;
-        padding: 0 14px;
-    }
-
-    </style>
     <asset:stylesheet src="ecodata.css"/>
     <g:layoutHead/>
 
@@ -50,68 +19,58 @@
 
 <body>
 <div id="fixed-footer-wrapper">
-    <div class="navbar navbar-fixed-top">
-        <div class="navbar-inner">
-
+    <div class="navbar navbar-expand-lg navbar-light bg-light">
             <div class="container-fluid">
-                <a class="brand">Ecodata</a>
-
-                <div class="nav-collapse collapse">
-                    <div class="navbar-text pull-right">
-                        <span id="buttonBar">
-                            <ec:currentUserDisplayName/>&nbsp;<hf:loginLogout cssClass="btn btn-small"
-                                                                              logoutUrl="${createLink(controller: 'logout', action: 'logout')}"/>
-                            %{--<button class="btn btn-small btn-info" id="btnProfile"><i class="icon-user icon-white"></i>&nbsp;My Profile</button>--}%
-                            <button class="btn btn-warning btn-small" id="btnAdministration"><i
-                                    class="icon-cog icon-white"></i>&nbsp;Administration</button>
+                <p class="nav-item navbar-brand" style="margin-top: 20px">Ecodata</p>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleHeaderContent" aria-controls="collapsibleHeaderContent" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="collapsibleHeaderContent">
+                    <div class="d-flex flex-grow-1">
+                        <span id="buttonBar" class="ms-auto">
+                            <ec:currentUserDisplayName/>&nbsp;<button id="btnLogout" class='nav-item btn btn-info'>Logout</button>
+                            <button class="btn btn-warning nav-item" id="btnAdministration"><i class="fa fa-cog"></i>&nbsp;Administration</button>
                             <g:pageProperty name="page.buttonBar"/>
                         </span>
                     </div>
                 </div><!--/.nav-collapse -->
             </div>
-        </div>
+       %{-- </div>--}%
     </div>
 
     <div class="container-fluid">
-        <legend>
-            <table style="width: 100%">
-                <tr>
-                    <td><g:link class="discreet" controller="home" action="index">Home</g:link><fc:navSeparator/><g:link
-                            class="discreet" action="index">Administration</g:link><fc:navSeparator/><g:pageProperty
-                            name="page.pageTitle"/></td>
+        <div class="row">
+            <div class="col-md-3">
+                <ul class="nav flex-column nav-stacked nav-pills">
 
-                </tr>
-            </table>
-        </legend>
-
-        <div class="row-fluid">
-            <div class="span3">
-                <ul class="nav nav-list nav-stacked nav-tabs">
-                    %{--<ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'users')}" title="Users" />--}%
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'tools')}" title="Tools"/>
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'settings')}" title="Settings"/>
-                    %{--<ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'metadata')}" title="Metadata" />--}%
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'audit')}" title="Audit"/>
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'metadata')}"
                                        title="Raw activity model"/>
-                    <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'activityModel')}"
-                                       title="Activity model"/>
-                    <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'rawOutputModels')}"
-                                       title="Raw output models"/>
+                    <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'editActivityFormDefinitions')}"
+                                       title="Edit activity form definitions"/>
+                    <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'editActivityFormTemplates')}"
+                                       title="Edit activity form templates"/>
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'programsModel')}"
                                        title="Programs model"/>
                     <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'searchScores')}"
                                        title="Scores list"/>
+                    <ec:breadcrumbItem href="${createLink(controller: 'admin', action: 'getIndexNames')}"
+                                       title="List custom indices"/>
+                    <ec:breadcrumbItem href="${createLink(controller: 'graphql', action: 'browser')}"
+                                       title="Graphql API"/>
 
                 </ul>
 
                 <div style="text-align: center; margin-top: 30px;"><g:pageProperty name="page.adminButtonBar"/></div>
             </div>
 
-            <div class="span9">
+            <div class="col-md-9">
                 <g:if test="${flash.errorMessage}">
                     <div class="container-fluid">
-                        <div class="alert alert-error">
+                        <div class="alert alert-danger">
+                            <button class="close" onclick="$('.alert').fadeOut();" href="#">×</button>
                             ${flash.errorMessage}
                         </div>
                     </div>
@@ -120,6 +79,7 @@
                 <g:if test="${flash.message}">
                     <div class="container-fluid">
                         <div class="alert alert-info">
+                            <button class="close" onclick="$('.alert').fadeOut();" href="#">×</button>
                             ${flash.message}
                         </div>
                     </div>
@@ -132,6 +92,10 @@
     </div>
 </div>
 
+<asset:javascript src="bundle-vendor"/>
+<asset:javascript src="bundle-runtime"/>
+<asset:javascript src="admin"/>
+
 <asset:script type="text/javascript">
 
     $(document).ready(function (e) {
@@ -139,7 +103,7 @@
         $.ajaxSetup({ cache: false });
 
         $("#btnLogout").click(function (e) {
-            window.location = "${createLink(controller: 'logout', action:'index')}";
+            window.location = "${createLink(controller: 'admin', action:'logout')}";
         });
 
         $("#btnAdministration").click(function (e) {
@@ -153,12 +117,7 @@
     });
 
 </asset:script>
-
-<!-- JS resources-->
-<asset:javascript src="admin.js"/>
 <asset:deferredScripts/>
-
-
 <!-- Google Analytics -->
 <script>
     (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){

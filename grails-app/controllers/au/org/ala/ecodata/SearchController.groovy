@@ -1,20 +1,26 @@
 package au.org.ala.ecodata
 
-import au.org.ala.ecodata.reporting.OrganisationXlsExporter
-import au.org.ala.ecodata.reporting.ProjectXlsExporter
-import au.org.ala.ecodata.reporting.SummaryXlsExporter
-import au.org.ala.ecodata.reporting.XlsExporter
+import au.org.ala.ecodata.Score
+import au.org.ala.ecodata.command.UserSummaryReportCommand
+import au.org.ala.ecodata.reporting.*
 import grails.converters.JSON
+import grails.web.servlet.mvc.GrailsParameterMap
 import groovy.json.JsonSlurper
-import groovyx.net.http.ContentType
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
+import groovy.util.logging.Slf4j
 import org.elasticsearch.action.search.SearchResponse
 import org.elasticsearch.search.SearchHit
+import org.elasticsearch.search.SearchHits
+import org.elasticsearch.search.aggregations.bucket.terms.ParsedTerms
+import org.elasticsearch.search.aggregations.bucket.terms.Terms
 
-import static au.org.ala.ecodata.ElasticIndex.*
 import java.text.SimpleDateFormat
 
+import static au.org.ala.ecodata.ElasticIndex.*
+
+@Slf4j
 class SearchController {
+
+    static responseFormats = ['json', 'xml']
 
     static final String PUBLISHED_ACTIVITIES_FILTER = 'publicationStatus:published'
 
@@ -32,6 +38,9 @@ class SearchController {
     SensitiveSpeciesService sensitiveSpeciesService
     ReportingService reportingService
     OrganisationService organisationService
+    MapService mapService
+    ManagementUnitService managementUnitService
+    ProgramService programService
 
     def index(String query) {
         def list = searchService.findForQuery(query, params)
@@ -44,8 +53,7 @@ class SearchController {
         }
 
         def res = elasticSearchService.search(params.query, params, DEFAULT_INDEX)
-        response.setContentType("application/json; charset=\"UTF-8\"")
-        render res
+        respond searchResponse:res
     }
 
     def elasticHome() {
@@ -54,8 +62,7 @@ class SearchController {
             geoSearch = new JsonSlurper().parseText(params.geoSearchJSON)
         }
         def res = elasticSearchService.search(params.query, params, HOMEPAGE_INDEX, geoSearch)
-        response.setContentType("application/json; charset=\"UTF-8\"")
-        render res
+        respond searchResponse:res
     }
 
     /*
@@ -68,12 +75,38 @@ class SearchController {
         if (params?.version) {
             //search auditMessage
             res = (auditMessageSearch(params) as JSON).toString()
+            response.setContentType("application/json; charset=\"UTF-8\"")
+            render res
         } else {
             elasticSearchService.buildProjectActivityQuery(params)
             res = elasticSearchService.search(params.query, params, PROJECT_ACTIVITY_INDEX)
+            respond searchResponse:res
         }
+
+    }
+
+    def getHeatmap () {
+        def res, index, geohashField, boundingBoxField
+        switch (params.dataType) {
+            case MapService.PROJECT_TYPE:
+                geohashField = "projectArea.geoPoint"
+                boundingBoxField = "projectArea.geoIndex"
+                index = HOMEPAGE_INDEX
+                break
+            default:
+                elasticSearchService.buildProjectActivityQuery(params)
+                geohashField = "sites.geoPoint"
+                boundingBoxField = "sites.geoIndex"
+                index = PROJECT_ACTIVITY_INDEX
+                break
+        }
+
+
+        res = elasticSearchService.searchAndAggregateOnGeohash(params.query, params, geohashField, boundingBoxField, index)
+        Map features = mapService.getFeatureCollectionFromSearchResult(res)
+        features = mapService.setHeatmapColour(features)
         response.setContentType("application/json; charset=\"UTF-8\"")
-        render res
+        render features as JSON
     }
 
     /*
@@ -163,19 +196,28 @@ class SearchController {
         [hits: [hits: projectActivities.collect { [_source: it]}, total: projectActivities.size() ]]
     }
 
+    private String propertyNameForFacet(String facet) {
+        String facetSuffix = "Facet"
+        String result = facet
+        if (facet?.endsWith(facetSuffix)) {
+            result = facet.substring(0, facet.indexOf(facetSuffix))
+        }
+        result
+    }
+
     private def populateGeoInfo(markBy, hit, selectedFacetTerms){
 
-        def geo = hit.source.geo
+        def geo = hit.sourceAsMap.geo
         if(!markBy) {
-            geo[0].geometry = hit.source.sites[0].extent.geometry
+            geo[0].geometry = hit.sourceAsMap.sites[0].extent.geometry
             return geo
         }
 
         def legendName, index
         // When fields are indexed, "Facet" or "Name" is appended to the field name.
-        String propertyName = markBy.replaceAll("Facet", "")
+        String propertyName = propertyNameForFacet(markBy)
 
-        def facetValue = hit.source[propertyName] ?:""
+        def facetValue = hit.sourceAsMap[propertyName] ?:""
 
         if (facetValue) {
             // Geographic facets will be List typed (as a site can be in more than one state for example)
@@ -198,7 +240,7 @@ class SearchController {
             }
         }
         else {
-            hit.source.sites.each { site ->
+            hit.sourceAsMap.sites.each { site ->
                 if(site.extent?.geometry) {
                     facetValue =  site.extent?.geometry[propertyName] ?: ""
 
@@ -236,65 +278,66 @@ class SearchController {
         if (params.geoSearchJSON) {
             geoSearch = new JsonSlurper().parseText(params.geoSearchJSON)
         }
+        String markBy = params.markBy
+        params.include = ['projectId', 'geo', 'name', 'organisationName', 'sites.extent', 'sites.siteId']
+        if (markBy) {
+            // Field name by convention is the markBy minus the word "Facet"
+            params.include << propertyNameForFacet(markBy)
+        }
+        SearchResponse res = elasticSearchService.search(params.query, params, ElasticIndex.HOMEPAGE_INDEX, geoSearch)
+        List selectedFacetTerms = []
 
-        def res = elasticSearchService.search(params.query, params, "homepage", geoSearch)
-        def selectedFacetTerms = []
-        def markBy = params.markBy
-
-        if(markBy){
-            res.facets.facets.each{ facet ->
-                if(facet.key.equals(markBy)){
-                    facet.value.eachWithIndex{ val, index ->
-                        def data = [:]
-                        data.legendName = val.term.toString()
-                        data.index = index
-                        data.count = 0
-                        selectedFacetTerms << data
-                    }
+        if (markBy) {
+            ParsedTerms toMarkBy = res.aggregations.find { it.name == markBy }
+            if (toMarkBy) {
+                List buckets = toMarkBy.buckets
+                buckets.eachWithIndex{ Terms.Bucket entry, int i ->
+                    Map data = [:]
+                    data.legendName = entry.key
+                    data.index = i
+                    data.count = entry.docCount
+                    selectedFacetTerms << data
                 }
             }
         }
 
         def geoRes = []
 
-        res.hits.hits.each { hit ->
-            if(hit.source?.geo) {
+        SearchHits hits = res.hits
+        SearchHit[] moreHits = hits.hits
+        for (SearchHit hit in moreHits) {
+            if (hit.sourceAsMap?.geo) {
                 def proj = [:]
-                proj.projectId = hit.source.projectId
-                proj.name = hit.source.name
-                proj.org = hit.source.organisationName
+                proj.projectId = hit.sourceAsMap.projectId
+                proj.name = hit.sourceAsMap.name
+                proj.org = hit.sourceAsMap.organisationName
                 proj.geo = populateGeoInfo(markBy, hit, selectedFacetTerms)
 
                 geoRes << proj
             }
         }
         response.setContentType("application/json; charset=\"UTF-8\"")
-        def projectsAndTotal = ['total':res.hits.getTotalHits(),'projects':geoRes,'selectedFacetTerms':selectedFacetTerms]
+        def projectsAndTotal = ['total':res.hits.totalHits.value,'projects':geoRes,'selectedFacetTerms':selectedFacetTerms]
 
         render projectsAndTotal as JSON
     }
+
     def elasticPost() {
         def paramsObj = request.JSON
         def paramMap = new GrailsParameterMap(paramsObj, request)
         log.debug "paramMap = ${paramMap}"
 
         if (paramMap) {
-            def res = elasticSearchService.search(paramMap.query, paramMap, "")
-            response.setContentType("application/json; charset=\"UTF-8\"")
-            render res
+            SearchResponse res = elasticSearchService.search(paramMap.query, paramMap, ElasticIndex.DEFAULT_INDEX)
+            respond searchResponse:res
         } else {
             def msg = [error: "Required JSON body not found"]
             render msg as JSON
         }
     }
 
-    def clearIndex() {
-        log.debug "Clearing index"
-        render elasticSearchService.deleteIndex()
-    }
-
     def indexAll() {
-        render elasticSearchService.indexAll() as JSON
+        render (elasticSearchService.indexAll()?:[]) as JSON
     }
 
     def dashboardReport() {
@@ -315,16 +358,31 @@ class SearchController {
         render results as JSON
     }
 
+    def targetsReportForScoreIds() {
+        def scoreIds = params.getList("scoreIds")
+        def scores = reportService.findScoresByScoreId(scoreIds)
+
+        Map results = targetsReportForScores(scores, params)
+        render results as JSON
+    }
+
     def targetsReportByScoreLabel() {
         def scoreLabels = params.getList("scores")
         def scores = reportService.findScoresByLabel(scoreLabels)
-        def filters = params.getList("fq")
-        def searchTerm = params.query ?: "*:*"
+
+        Map results = targetsReportForScores(scores, params)
+        render results as JSON
+    }
+
+    private def targetsReportForScores(List scores, params) {
+        List filters = params.getList("fq")
+        String searchTerm = params.query ?: "*:*"
+        boolean approvedActivitiesOnly = params.getBoolean('approvedActivitiesOnly', true)
         def targets = reportService.outputTargetsBySubProgram(params, scores)
-        def scoresReport = reportService.outputTargetReport(filters, searchTerm, scores)
+        def scoresReport = reportService.aggregate(filters, searchTerm, scores, null, approvedActivitiesOnly)
 
         def results = [scores:scoresReport, targets:targets]
-        render results as JSON
+        return results
     }
 
     def targetsReport() {
@@ -341,9 +399,30 @@ class SearchController {
     @RequireApiKey
     def activityReport() {
         Map params = request.JSON
-        def results = reportService.runActivityReport(params.query ?: "*:*", params.fq, params.reportConfig, params.approvedActivitiesOnly?:true)
+        def approvedOnly = params.approvedActivitiesOnly
+        def results = reportService.runActivityReport(params.query ?: "*:*", params.fq, params.reportConfig, approvedOnly)
         render results as JSON
     }
+
+    @RequireApiKey
+    def genericReport() {
+        Map params = request.JSON
+        String index = params.index ?: ElasticIndex.DEFAULT_INDEX
+        if(![ElasticIndex.DEFAULT_INDEX, ElasticIndex.HOMEPAGE_INDEX, ElasticIndex.PROJECT_ACTIVITY_INDEX].contains(index) ) {
+            response.setStatus(400)
+            render text: [message: "Bad request: index not recognised"] as JSON
+            return
+        }
+
+        def results = reportService.runReport(params.query ?: "*:*", params.fq, params.reportConfig, index)
+        render results as JSON
+    }
+
+
+    @Deprecated
+    /**
+     *  Use DownloadController instead
+    */
 
     def downloadProjectDataFile() {
         if (!params.id) {
@@ -351,9 +430,14 @@ class SearchController {
             render "A download ID is required"
         } else {
             String extension = params.fileExtension ?: 'zip'
-            File file = new File("${grailsApplication.config.temp.dir}${File.separator}${params.id}.${extension}")
+            File file = new File("${grailsApplication.config.getProperty('temp.dir')}${File.separator}${params.id}.${extension}")
             if (file) {
-                response.setContentType(ContentType.BINARY.toString())
+                if (extension.toLowerCase() == "zip") {
+                    response.setContentType("application/zip")
+                } else {
+                    response.setContentType("application/octet-stream")
+                }
+
                 response.setHeader('Content-Disposition', 'Attachment;Filename="data.'+extension+'"')
 
                 file.withInputStream { i -> response.outputStream << i }
@@ -381,19 +465,19 @@ class SearchController {
                     render "OK"
                 }
             } else {
-                response.setContentType(ContentType.BINARY.toString())
+                response.setContentType("application/zip")
                 response.setHeader('Content-Disposition', 'Attachment;Filename="data.zip"')
 
                 downloadService.downloadProjectData(response.outputStream, params)
             }
         } else {
-            downloadMeritData(params)
+            downloadProjectData(params)
             response.setStatus(200)
             render "OK"
         }
     }
 
-    void downloadMeritData(GrailsParameterMap params) {
+    void downloadProjectData(GrailsParameterMap params) {
         if (!params.max) {
             params.max = 5000
             params.offset = 0
@@ -401,38 +485,64 @@ class SearchController {
 
         Set ids = downloadService.getProjectIdsForDownload(params, HOMEPAGE_INDEX)
 
-        withFormat {
-            json {
-                List projects = ids.collect { projectService.get(it, ProjectService.ALL) }
-                render projects as JSON
-            }
-            xlsx {
-                if (!params.email) {
-                    params.email = userService.getCurrentUserDetails().userName
-                }
-                params.fileExtension = "xlsx"
-                Closure doDownload = { OutputStream outputStream, GrailsParameterMap paramMap ->
-                    XlsExporter exporter = exportMeritProjectsToXls(ids, params.getList('tabs'))
-                    exporter.save(outputStream)
-                }
-                downloadService.downloadProjectDataAsync(params, doDownload)
-            }
+
+        if (!params.email) {
+            params.email = userService.getCurrentUserDetails().userName
         }
+        log.info("Download requested: "+params.email+", Project count: "+ids?.size()+", Tabs: "+params.tabs)
+        params.fileExtension = "xlsx"
+        Closure doDownload = { OutputStream outputStream, GrailsParameterMap paramMap ->
+
+            File file = File.createTempFile("download", "xlsx")
+            XlsExporter xlsExporter
+            ProjectExporter projectExporter
+            if (params.reportType == 'works') {
+                xlsExporter = new XlsExporter(file.name)
+                projectExporter = worksProjectExporter(xlsExporter, params)
+            }
+            else {
+                xlsExporter = new StreamingXlsExporter(file.name)
+                projectExporter = meritProjectExporter(xlsExporter, params)
+            }
+            exportProjectsToXls(ids, projectExporter)
+            xlsExporter.save(outputStream)
+        }
+        downloadService.downloadProjectDataAsync(params, doDownload)
     }
 
-    private XlsExporter exportMeritProjectsToXls(Set<String> projectIds, List<String> tabsToExport) {
+    protected ProjectExporter meritProjectExporter(XlsExporter xlsExporter, GrailsParameterMap params) {
+        String ELECTORATES = 'electFacet'
+        params.facets = ELECTORATES
+        SearchResponse result = elasticSearchService.search(params.query, params, HOMEPAGE_INDEX)
+        List<String> electorates = result.aggregations?.find{it.name == ELECTORATES}?.buckets?.collect{it.key}
+        List tabsToExport = params.getList('tabs')
+        boolean formSectionPerTab = params.getBoolean("formSectionPerTab", false)
+        Map dataDescriptionLookup = null
+        if (params.includeDataDescriptionSheet) {
+            dataDescriptionLookup = [:].withDefault {
+                DataDescription.findByXlsxName(it)
+            }
+        }
+
+        return new ProjectXlsExporter(projectService, xlsExporter, tabsToExport, electorates, managementUnitService,  organisationService, programService, dataDescriptionLookup, formSectionPerTab)
+    }
+
+    private ProjectExporter worksProjectExporter(XlsExporter xlsExporter, GrailsParameterMap params) {
+        return new WorksProjectXlsExporter(xlsExporter, [:], TimeZone.getDefault())
+    }
+
+    private XlsExporter exportProjectsToXls(Set<String> projectIds, ProjectExporter projectExporter) {
         long start = System.currentTimeMillis()
-
-        File file = File.createTempFile("download", "xlsx")
-        XlsExporter xlsExporter = new XlsExporter(file.name)
-
-        ProjectXlsExporter projectExporter = new ProjectXlsExporter(projectService, xlsExporter, tabsToExport)
 
         Project.withSession { session ->
             int batchSize = 50
             List projects = new ArrayList(batchSize)
             for (int i = 0; i < projectIds.size(); i++) {
-                projects << projectService.get(projectIds[i], ProjectService.ALL)
+                Map project =  projectService.get(projectIds[i], ProjectService.ALL)
+                if (project)
+                    projects << project
+                else
+                    log.warn(projectIds[i] + ' cannot be found!')
 
                 if (i % batchSize == batchSize - 1 || i == projectIds.size() - 1) {
                     projectExporter.exportAllProjects(projects)
@@ -444,8 +554,6 @@ class SearchController {
             }
         }
         log.info "Exporting ${projectIds.size()} projects took ${System.currentTimeMillis() - start} millis"
-
-        xlsExporter
     }
 
     def downloadOrganisationData() {
@@ -527,57 +635,29 @@ class SearchController {
     }
 
     @RequireApiKey
-    def downloadUserList() {
+    def downloadUserList(UserSummaryReportCommand userSummaryReportCommand) {
 
-        if (!params.email) {
-            params.email = userService.getCurrentUserDetails().userName
+        if (userSummaryReportCommand.hasErrors()) {
+            respond userSummaryReportCommand.errors
+            return
         }
-
-        params.fileExtension = "csv"
-
-        Map searchParams = [fq:params.fq, query:params.query?:"*:*", max:10000, offset:0]
+        log.info("User "+userService.getCurrentUserDisplayName()+" requested the user summary report for hub "+userSummaryReportCommand.hubId)
+        String hubId = userSummaryReportCommand.hubId
 
         Closure doDownload = { OutputStream outputStream, GrailsParameterMap paramMap ->
-
             try {
-                Set projectIds = downloadService.getProjectIdsForDownload(searchParams, HOMEPAGE_INDEX)
-
-                List meritRoles = ['ROLE_FC_READ_ONLY', 'ROLE_FC_OFFICER', 'ROLE_FC_ADMIN']
-                Map users = reportService.userSummary(projectIds, meritRoles)
-
-                outputStream.withWriter { writer ->
-                    writer.println("User Id, Name, Email, Role, Project ID, Grant ID, External ID, Project Name, Project Access Role")
-
-                    users.values().each { user->
-
-                        writer.print(user.userId+","+user.name+","+user.email+","+user.role+",")
-                        if (user.projects) {
-                            boolean first = true
-                            user.projects.each { project ->
-                                if (!first) {
-                                    writer.print(",,,,")
-                                }
-                                writer.println(project.projectId+","+project.grantId+","+project.externalId+",\""+project.name+"\","+project.access)
-                                first = false
-                            }
-                        }
-                        else {
-                            writer.println()
-                        }
-
-
-                    }
+                outputStream.withPrintWriter { writer ->
+                    reportService.userSummary(hubId, writer)
                 }
             }
             catch (Exception e) {
-                e.printStackTrace()
+                log.error("There was an error running the user report for hubId "+hubId, e)
             }
         }
-        downloadService.downloadProjectDataAsync(params, doDownload)
+        downloadService.downloadProjectDataAsync(userSummaryReportCommand.populateParams(params), doDownload)
 
         response.status = 200
         render "OK"
-
     }
 
     @RequireApiKey
@@ -595,18 +675,18 @@ class SearchController {
         if (!query) {
             query = '*'
         }
-
+        params.include = 'projectId'
         SearchResponse res = elasticSearchService.search(query, params, "homepage")
 
         Set ids = new HashSet()
 
         for (SearchHit hit : res.hits.hits) {
-            if (hit.source.projectId) {
-                ids << hit.source.projectId
+            if (hit.sourceAsMap.projectId) {
+                ids << hit.sourceAsMap.projectId
             }
         }
 
-        Closure doDownload = {  OutputStream outputStream, GrailsParameterMap paramMap ->
+        Closure doDownload = { OutputStream outputStream, GrailsParameterMap paramMap ->
             SimpleDateFormat format = new SimpleDateFormat('yyyy-MM-dd')
             def name = 'meritSites-' + format.format(new Date())
 
@@ -636,5 +716,13 @@ class SearchController {
             response.setStatus(400)
             render ([status:'error', error:'Invalid query (expected: name, lat and lng)'] as JSON)
         }
+    }
+
+    /**
+     * A test method to get the document mapping used by Elastic Search (or will be used by in the next re-index).
+     * @return
+     */
+    def getMapping(){
+        render(text: elasticSearchService.getMapping() as JSON, contentType: 'application/json')
     }
 }

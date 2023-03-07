@@ -1,0 +1,57 @@
+{
+  "title": "Sward Height",
+  "modelName": "ESP Sward Height",
+  "dataModel": [
+    {
+      "dataType": "list",
+      "name": "swardHeight",
+      "columns": [
+        {
+          "dataType": "number",
+          "name": "swardHeightCm",
+          "validate": "required,min[0]"
+        },
+        {
+          "dataType": "date",
+          "name": "dateMeasured",
+          "validate": "required"
+        }
+      ]
+    }
+  ],
+  "viewModel": [
+    {
+      "items": [
+        {
+          "source": "If you undertake grazing, please record sward height at the end of your grazing periods (in the table under “Livestock Grazing Management). If you do not undertake grazing, then record sward height at the same time that you take the photo-point photograph for this site. Please ensure that this is done at the same time each year.",
+          "type": "literal"
+        }
+      ],
+      "type": "row"
+    },
+    {
+      "items": [
+        {
+          "source": "swardHeight",
+          "columns": [
+            {
+              "title": "Sward Height (cm)",
+              "source": "swardHeightCm",
+              "type": "number"
+            },
+            {
+              "title": "Date measured",
+              "source": "dateMeasured",
+              "type": "date"
+            }
+          ],
+          "userAddedRows": true,
+          "disableTableUpload": true,
+          "type": "table"
+        }
+      ],
+      "type": "row"
+    }
+  ],
+  "description": "To measure sward height, find a spot on your site that is representative of the site. Use either a ruler or eyeball a measurement of the sward height. If using a ruler, place the base on the surface of the soil. Slide your thumb down until you touch the top of the leaf blade. Do not measure the stems or flower heads."
+}

@@ -1,0 +1,14 @@
+import au.org.ala.ecodata.mapper.ElasticSearchBackwardsCompatibilityMapper
+import org.elasticsearch.search.SearchHit
+
+model {
+    SearchHit searchHit
+}
+
+json {
+    _id searchHit.id
+    _source ElasticSearchBackwardsCompatibilityMapper.mapHitSource(searchHit.sourceAsMap)
+
+    highlightFields searchHit.highlightFields
+    //score searchHit.score // This had issues with NaN unable to be serialized
+}

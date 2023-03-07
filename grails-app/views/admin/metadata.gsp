@@ -1,4 +1,4 @@
-<%@ page import="org.apache.commons.lang.StringEscapeUtils" %>
+<%@ page import="grails.converters.JSON; org.apache.commons.lang.StringEscapeUtils" %>
 <!doctype html>
 <html>
     <head>
@@ -7,25 +7,12 @@
     </head>
 
     <body>
-        <script type="text/javascript">
 
-            $(document).ready(function() {
-
-            });
-
-        </script>
         <content tag="pageTitle">Metadata</content>
         <table class="table table-bordered">
             <thead>
                 <tr>
                     <th><span style="font-size: large">Activities model</span>
-                        <span id="viewModeBtns" class="pull-right">
-                            <button title="Temporarily disabled" id="btnEdit" data-target="activitiesMetadata" class="btn btn-small btn-info">Edit</button>
-                        </span>
-                        <span id="editModeBtns" style="display:none;" class="pull-right">
-                            <button id="btnSave" class="btn btn-small btn-success">Save</button>
-                            <button id="btnCancel" class="btn btn-small">Cancel</button>
-                        </span>
                     </th>
                 </tr>
             </thead>
@@ -41,7 +28,7 @@
 
         <asset:script>
             $(function(){
-                $('#activitiesMetadata').html(vkbeautify.json(${activitiesMetadata},2));
+                $('#activitiesMetadata').html(JSON.stringify(${raw((activitiesMetadata as JSON).toString())},null, 2));
 
                 // assume only one edit field for now
                 var $pre = $('#activitiesMetadata'),
@@ -62,7 +49,7 @@
                         contentType: 'application/json',
                         success: function (data) {
                             if (data !== 'error') {
-                                $pre.html(vkbeautify.json(data,2));
+                                $pre.html(JSON.stringify(data,null,2));
                                 viewMode();
                             } else {
                                 alert(data);

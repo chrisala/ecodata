@@ -3,9 +3,14 @@ package au.org.ala.ecodata
 import au.org.ala.ecodata.reporting.CSProjectXlsExporter
 import au.org.ala.ecodata.reporting.ProjectExporter
 import au.org.ala.ecodata.reporting.ShapefileBuilder
+import au.org.ala.ecodata.reporting.StreamingXlsExporter
 import au.org.ala.ecodata.reporting.XlsExporter
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
+import grails.async.Promise
+import grails.web.servlet.mvc.GrailsParameterMap
 import org.elasticsearch.action.search.SearchResponse
+import org.elasticsearch.action.search.SearchScrollRequest
+import org.elasticsearch.client.RequestOptions
+import org.elasticsearch.core.TimeValue
 import org.elasticsearch.search.SearchHit
 
 import java.util.zip.ZipEntry
@@ -24,9 +29,11 @@ class DownloadService {
     OutputService outputService
     SiteService siteService
     EmailService emailService
+    WebService webService
 
     def grailsApplication
     def groovyPageRenderer
+    def grailsLinkGenerator
 
     /**
      * Produces the same file as {@link #downloadProjectData(java.io.OutputStream, org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap)}
@@ -38,20 +45,21 @@ class DownloadService {
      */
     void downloadProjectDataAsync(GrailsParameterMap params, Closure downloadAction) {
         String downloadId = UUID.randomUUID().toString()
-        File directoryPath = new File("${grailsApplication.config.temp.dir}")
+        File directoryPath = new File("${grailsApplication.config.getProperty('temp.dir')}")
         directoryPath.mkdirs()
         String fileExtension = params.fileExtension?:'zip'
         FileOutputStream outputStream = new FileOutputStream(new File(directoryPath, "${downloadId}.${fileExtension}"))
 
-        task {
+        Promise p = task {
             // need to create a new session to ensure that all <entity>.getProperty('dbo') calls work: by default, async
             // calls result in detached entities, which cannot get the underlying Mongo DBObject.
-            Project.withNewSession {
-                downloadAction(outputStream, params)
-            }
-        }.onComplete {
-            int days = grailsApplication.config.temp.file.cleanup.days as int
-            String urlPrefix = params.downloadUrl ?: grailsApplication.config.async.download.url.prefix
+               Project.withNewSession {
+                   downloadAction(outputStream, params)
+               }
+        }
+        p.onComplete {
+            int days = grailsApplication.config.getProperty('temp.file.cleanup.days', Integer)
+            String urlPrefix = params.downloadUrl ?: grailsApplication.config.getProperty('async.download.url.prefix')
             String url = "${urlPrefix}${downloadId}?fileExtension=${fileExtension}"
             String body = groovyPageRenderer.render(template: "/email/downloadComplete", model:[url: url, days: days])
             emailService.sendEmail("Your download is ready", body, [params.email], [], params.systemEmail, params.senderEmail)
@@ -59,8 +67,9 @@ class DownloadService {
                 outputStream.flush()
                 outputStream.close()
             }
-        }.onError { Throwable error ->
-            log.error("Failed to generate zip file for download.", error)
+        }
+        p.onError { Throwable error ->
+            log.error("Failed to generate file for download.", error)
             String body = groovyPageRenderer.render(template: "/email/downloadFailed")
             emailService.sendEmail("Your download has failed", body, [params.email], [], params.systemEmail, params.senderEmail)
             if (outputStream) {
@@ -73,6 +82,39 @@ class DownloadService {
     void downloadProjectDataAsync(GrailsParameterMap map) {
         Closure doDownload = {OutputStream outputStream, GrailsParameterMap params -> downloadProjectData(outputStream, params)}
         downloadProjectDataAsync(map, doDownload)
+    }
+
+    def generateReports(Map params, Closure downloadAction) {
+        String downloadId = UUID.randomUUID().toString()
+        File directoryPath = new File("${grailsApplication.config.getProperty('temp.dir')}")
+        directoryPath.mkdirs()
+        String fileExtension = params.fileExtension?:'zip'
+        File file = new File(directoryPath, "${downloadId}.${fileExtension}")
+
+        task {
+                downloadAction(file)
+        }.onComplete {
+            int days = grailsApplication.config.getProperty('temp.file.cleanup.days', Integer)
+            String url = ''
+            // if report url is not supply by FieldCapture, then create a url based on ecodata
+            if (!params.reportDownloadBaseUrl)
+                url = grailsLinkGenerator.link(controller:'download', action:'get', params:[id: downloadId, fileExtension: fileExtension])
+            else
+                url = params.reportDownloadBaseUrl+'/' + downloadId+'.'+fileExtension
+
+            String body = groovyPageRenderer.render(template: "/email/downloadComplete", model:[url: url, days: days])
+            if(params.email && params.systemEmail && params.senderEmail)
+                emailService.sendEmail("Your download is ready", body, [params.email], [], params.systemEmail, params.senderEmail)
+            else
+                log.error('Email system is missing sender/receiver')
+
+        }.onError { Throwable error ->
+            log.error("Failed to generate zip file for download.", error)
+            String body = groovyPageRenderer.render(template: "/email/downloadFailed")
+            emailService.sendEmail("Your download has failed", body, [params.email], [], params.systemEmail, params.senderEmail)
+        }
+
+        return downloadId+'.'+fileExtension
     }
 
     /**
@@ -117,7 +159,7 @@ class DownloadService {
                 log.debug("Images added")
 
                 XlsExporter xlsExporter = exportProjectsToXls(activitiesByProject, documentMap, "data", timeZone)
-                zip.putNextEntry(new ZipEntry("data.xls"))
+                zip.putNextEntry(new ZipEntry("data.xlsx"))
                 ByteArrayOutputStream xslFile = new ByteArrayOutputStream()
                 xlsExporter.save(xslFile)
                 xslFile.flush()
@@ -205,16 +247,27 @@ class DownloadService {
         zip.putNextEntry(new ZipEntry("images/"))
 
         activitiesByProject.each { projectId, activityIds ->
-            def project = projectService.get(projectId, [ ProjectService.BRIEF ])
+            long currentTimeMillis = System.currentTimeMillis()
+            def project = projectService.get(projectId, [ProjectService.BRIEF])
             def projectName = project.name ?: projectId
             def projectPath = makePath("images/${projectName}/", paths)
             def recordMap = [:].withDefault { [] }
             def activityPathBase = makePath("${projectPath}activities/", paths)
             zip.putNextEntry(new ZipEntry(activityPathBase))
 
-            groupDocumentsByActivityAndOutput(projectId).each { activityId, documentsMap ->
+          //  log.info "Time taken before groupDocumentsByActivityAndOutput for project ${projectId} is ${System.currentTimeMillis() - currentTimeMillis} millis"
+            currentTimeMillis = System.currentTimeMillis()
+
+            def docs = []
+            if (activityIds == null || activityIds.isEmpty()) {
+                docs = groupProjectDocumentsByActivityAndOutput(projectId)
+            } else {
+                docs = groupActivityDocumentsByActivityAndOutput (activityIds)
+            }
+
+            docs.each { activityId, documentsMap ->
                 if (activityId && activityIds?.contains(activityId)) {
-                    def activity = activityService.get(activityId, [ ActivityService.FLAT ])
+                    def activity = activityService.get(activityId, [ActivityService.FLAT])
                     def projectActivity = projectActivityService.get(activity.projectActivityId)
                     def activityName = projectActivity.name ?: activityId
                     def activityPath = makePath("${activityPathBase}${activityName}/", paths)
@@ -252,22 +305,28 @@ class DownloadService {
 
             zip.closeEntry()
 
+            log.info "Zipping DocumentsByActivityAndOutput images for project ${projectId} took ${System.currentTimeMillis() - currentTimeMillis} millis"
+
             // put record images into a separate directory structure
             def recordPath = makePath("${projectPath}records/", paths)
             //zip.putNextEntry(new ZipEntry(recordPath))
 
-            groupDocumentsByRecord(projectId).each { recordId, documentList ->
+            currentTimeMillis = System.currentTimeMillis()
+
+            groupDocumentsByRecord(projectId, activityIds).each { recordId, documentList ->
                 def recordIdPath = "${recordPath}${recordId}/"
                 recordIdPath = makePath(recordIdPath, paths)
                 documentList.each { doc ->
                     if (doc.type == Document.DOCUMENT_TYPE_IMAGE) {
-                        if (!documentMap.containsKey(doc.documentId)) {
+                       // if (!documentMap.containsKey(doc.documentId)) {
                             addFileToZip(zip, recordIdPath, doc, documentMap, paths)
-                        }
+                       // }
                         recordMap[recordId] << doc
                     }
                 }
             }
+
+            log.info "Total Zipping groupDocumentsByRecord images for project ${projectId} took ${System.currentTimeMillis() - currentTimeMillis} millis"
             if (!recordMap.isEmpty()) {
                 zip.putNextEntry(new ZipEntry("${projectPath}records.csv"))
                 writeRecordMap(zip, recordMap, documentMap)
@@ -312,8 +371,9 @@ class DownloadService {
 
     private addFileToZip(ZipOutputStream zip, String zipPath, Document doc, Map<String, Object> documentMap, Set<String> existing, boolean thumbnail = false) {
         String zipName = makePath("${zipPath}${zipPath.endsWith('/') ? '' : '/'}${thumbnail ? Document.THUMBNAIL_PREFIX : ''}${doc.filename}", existing)
-        String path = "${grailsApplication.config.app.file.upload.path}${File.separator}${doc.filepath}${File.separator}${doc.filename}"
+        String path = "${grailsApplication.config.getProperty('app.file.upload.path')}${File.separator}${doc.filepath}${File.separator}${doc.filename}"
         File file = new File(path)
+        String url
 
         if (thumbnail) {
             file = documentService.makeThumbnail(doc.filepath, doc.filename, false)
@@ -321,6 +381,16 @@ class DownloadService {
         if (file != null && file.exists()) {
             zip.putNextEntry(new ZipEntry(zipName))
             file.withInputStream { i -> zip << i }
+        }
+        else if (doc.getUrl()) {
+            // reporting server does not hold images.
+            // download it by requesting image from BioCollect/MERIT
+            url = doc.getUrl()
+            def stream = webService.getStream(url, true)
+            if (!(stream instanceof Map)) {
+                zip.putNextEntry(new ZipEntry(zipName))
+                zip << stream
+            }
         } else {
             zipName = zipName + ".notfound"
             zip.putNextEntry(new ZipEntry(zipName))
@@ -330,7 +400,7 @@ class DownloadService {
         zip.closeEntry()
     }
 
-    private static Map<String, Map<String, List<Document>>> groupDocumentsByActivityAndOutput(String projectId) {
+    private static Map<String, Map<String, List<Document>>> groupProjectDocumentsByActivityAndOutput(String projectId) {
         Map<String, Map<String, List<Document>>> documents = [:].withDefault { [:].withDefault { [] } }
 
         Activity.findAllByProjectIdAndStatusNotEqual(projectId, Status.DELETED).each { activity ->
@@ -342,15 +412,48 @@ class DownloadService {
         documents
     }
 
-    private static Map<String, List<Document>> groupDocumentsByRecord(String projectId) {
+    private static Map<String, Map<String, List<Document>>> groupActivityDocumentsByActivityAndOutput(Set<String> activityIdsSet) {
+        Map<String, Map<String, List<Document>>> documents = [:].withDefault { [:].withDefault { [] } }
+
+        List activityIds = []
+        activityIds.addAll(activityIdsSet)
+
+        Document.findAllByActivityIdInListAndStatusNotEqual(activityIds, Status.DELETED)?.each {
+            documents[it.activityId ?: null][it.outputId ?: null] << it
+        }
+
+        documents
+    }
+
+    private static Map<String, List<Document>> groupDocumentsByRecord(String projectId, Set<String> activityIdsSet = null) {
         Map<String, List<Document>> documents = [:].withDefault { [] }
 
-        Record.findAllByProjectIdAndStatusNotEqual(projectId, Status.DELETED).each { Record record ->
+        List documentIds = []
+        Map<String, String> recordDocumentMap = [:]
+
+        def recordList
+        if (activityIdsSet == null || activityIdsSet.isEmpty()) {
+            recordList = Record.findAllByProjectIdAndStatusNotEqual(projectId, Status.DELETED)
+        } else {
+            List activityIds = []
+            activityIds.addAll(activityIdsSet)
+            recordList = Record.findAllByProjectIdAndActivityIdInListAndStatusNotEqual(projectId, activityIds, Status.DELETED)
+        }
+
+        recordList.each { Record record ->
             record.multimedia?.each { multimedia ->
-                Document.findAllByDocumentId(multimedia.documentId)?.each { doc ->
-                    documents[record.occurrenceID ?: null] << doc
+                if (multimedia.documentId) {
+                    recordDocumentMap.put(multimedia.documentId, record.occurrenceID ?: null)
+                    documentIds.add(multimedia.documentId)
                 }
             }
+        }
+
+        List<Document> documentList = Document.findAllByDocumentIdInListAndStatusNotEqual(documentIds, Status.DELETED)
+
+        documentList.each { doc ->
+            String recOccurrentId = recordDocumentMap.get(doc.documentId)
+            documents[recOccurrentId ?: null] << doc
         }
 
         documents
@@ -359,9 +462,14 @@ class DownloadService {
     XlsExporter exportProjectsToXls(Map<String, Set<String>> activityIdsByProject, Map<String, Object> documentMap, String fileName = "results", TimeZone timeZone) {
         long start = System.currentTimeMillis()
 
-        XlsExporter xlsExporter = new XlsExporter(fileName)
+        XlsExporter xlsExporter = new StreamingXlsExporter(fileName)
+
+        log.info "Exporting activities"
 
         ProjectExporter projectExporter = new CSProjectXlsExporter(xlsExporter, documentMap, timeZone)
+
+        log.info "Before exportActivities projects took ${System.currentTimeMillis() - start} millis"
+        start = System.currentTimeMillis()
 
         projectExporter.exportActivities(activityIdsByProject)
 
@@ -373,12 +481,13 @@ class DownloadService {
     Set<String> getProjectIdsForDownload(Map params, String searchIndexName, String property = 'projectId') {
         long start = System.currentTimeMillis()
 
+        params.include = property
         SearchResponse res = elasticSearchService.search(params.query, params, searchIndexName)
         Set ids = new HashSet()
 
         for (SearchHit hit : res.hits.hits) {
-            if (hit.source[property]) {
-                ids << hit.source[property]
+            if (hit.sourceAsMap[property]) {
+                ids << hit.sourceAsMap[property]
             }
         }
 
@@ -390,13 +499,29 @@ class DownloadService {
     Map<String, Set<String>> getActivityIdsForDownload(Map params, String searchIndexName) {
         long start = System.currentTimeMillis()
 
-        SearchResponse res = elasticSearchService.search(params.query, params, searchIndexName)
         Map<String, Set<String>> ids = [:].withDefault { new HashSet() }
 
-        for (SearchHit hit : res.hits.hits) {
-            if (hit.source.projectId) {
-                ids[hit.source.projectId] << hit.source.activityId
+        List include = params.getList('include') ?: []
+        include += ['projectId', 'activityId']
+
+        params.put('include',include)
+
+        int batchSize = 100
+        int processed = 0
+        def count = batchSize
+
+        params.max = batchSize
+
+        SearchResponse results = elasticSearchService.search(params.query, params, searchIndexName, [:], true)
+        while (results.getHits().getHits().length != 0) {
+            for (SearchHit hit : results.getHits().getHits()) {
+                Map result = hit.sourceAsMap
+                if (result.projectId) {
+                    ids[hit.sourceAsMap.projectId] << hit.sourceAsMap.activityId
+                }
             }
+
+            results = elasticSearchService.client.scroll(new SearchScrollRequest(results.getScrollId()).scroll(new TimeValue(60000)), RequestOptions.DEFAULT)
         }
 
         log.info "Query of ${ids.size()} projects took ${System.currentTimeMillis() - start} millis"

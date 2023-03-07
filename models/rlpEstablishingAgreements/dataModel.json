@@ -1,0 +1,321 @@
+{
+    "dataModel": [{
+        "columns": [
+            {
+                "dataType": "text",
+                "name": "agreementType",
+                "description": "",
+                "constraints": [
+                    "On title in perpetuity (e.g. conservation convenant)",
+                    "Binding agreement not on title in perpetuity (e.g. property vegetation plan)",
+                    "Termed agreement not on title - binding (e.g. land management agreement)",
+                    "Not on title - non-binding (e.g. Wildlife Refuge)",
+                    "No protection mechanism applicable",
+                    "Other"
+                ],
+                "validate": "required"
+            },
+            {
+                "dataType": "text",
+                "name": "otherAgreementType",
+                "description": "",
+                "behaviour": [{
+                    "condition": "agreementType == \"Other\"",
+                    "type": "enable"
+                }],
+                "validate": "required,maxSize[300]"
+            },
+            {
+                "dataType": "text",
+                "name": "establishedOrMaintained",
+                "constraints": [
+                    "Established",
+                    "Maintained"
+                ],
+                "validate": "required"
+            },
+            {
+                "dataType": "number",
+                "name": "numberOfAgreements",
+                "validate": "required,min[0]"
+            },
+            {
+                "dataType": "number",
+                "name": "numberOfDaysMaintainingAgreements",
+                "description": "Number of days should be calculated as number of days by number of people (eg. 4.5 days by 3 people is 13.5 days)",
+                "validate": "required,min[0]"
+            },
+            {
+                "dataType": "feature",
+                "name": "agreementSites"
+            },
+            {
+                "computed": {
+                    "expression": "$geom.areaHa(agreementSites)"
+                },
+                "dataType": "number",
+                "name": "calculatedAreaCoveredByAgreementsHa",
+                "units": "ha"
+            },
+            {
+                "defaultValue": {
+                    "type": "computed",
+                    "expression": "calculatedAreaCoveredByAgreementsHa"
+                },
+                "dataType": "number",
+                "units": "ha",
+                "name": "areaCoveredByAgreementsHa",
+                "validate": "required,min[0]"
+            },
+            {
+                "dataType": "text",
+                "name": "mappingNotAlignedReason",
+                "constraints": [
+                    "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                    "Other"
+                ],
+                "validate": "required",
+                "behaviour": [
+                    {
+                        "condition": "not (within(areaCoveredByAgreementsHa, calculatedAreaCoveredByAgreementsHa, 0.1))",
+                        "type": "visible"
+                    }
+                ]
+            },
+            {
+                "dataType": "text",
+                "name": "mappingNotAlignedComments",
+                "validate": "required,maxSize[300]",
+                "behaviour": [
+                    {
+                        "type": "visible",
+                        "condition": "\"Other\" == mappingNotAlignedReason"
+                    }]
+            },
+
+
+            {
+                "dataType": "number",
+                "units": "ha",
+                "name": "areaOfCoveredByAgreementsInvoicedHa",
+                "validate": [
+                    {"rule": "required"},
+                    {"rule": "min[0]"},
+                    {
+                        "rule": "max",
+                        "param": {
+                            "type": "computed",
+                            "expression": "areaCoveredByAgreementsHa"
+                        }
+                    }
+                ]
+            },
+            {
+                "dataType": "document",
+                "name": "extraMappingDetails",
+                "validate": "required",
+                "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                "behaviour": [
+                    {
+                        "condition": "not (within(calculatedAreaCoveredByAgreementsHa, areaCoveredByAgreementsHa, 0.1)) or roundTo(areaCoveredByAgreementsHa, 2) != roundTo(areaOfCoveredByAgreementsInvoicedHa, 2)",
+                        "type": "visible"
+                    }
+                ]
+            },
+
+            {
+                "dataType": "text",
+                "name": "invoicedNotActualReason",
+                "constraints": [
+                    "Work was undertaken over a greater area than will be invoiced for",
+                    "Other"
+                ],
+                "validate": "required",
+                "behaviour": [
+                    {
+                        "condition": "roundTo(areaOfCoveredByAgreementsInvoicedHa, 2) != roundTo(areaCoveredByAgreementsHa, 2)",
+                        "type": "visible"
+                    }
+                ]
+            },
+            {
+                "dataType": "text",
+                "name": "invoicedNotActualComments",
+                "behaviour": [
+                    {
+                        "type": "visible",
+                        "condition": "\"Other\" == invoicedNotActualReason"
+                    }],
+                "validate": "required,maxSize[300]"
+            }
+
+
+        ],
+        "dataType": "list",
+        "name": "agreements"
+    }],
+    "modelName": "RLP - Establishing Agreements",
+    "title": "Establishing and maintaining agreements",
+    "viewModel": [{
+        "type": "section",
+        "items": [{
+            "columns": [
+                {
+                    "width": "20%",
+                    "title": "Agreement type",
+                    "type": "col",
+                    "items": [
+                        {
+                            "type": "row",
+                            "items":[
+                                {
+                                    "source": "agreementType",
+                                    "type": "select2"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items":[
+                                {
+                                    "source": "otherAgreementType",
+                                    "title": "Other agreement type",
+                                    "type": "textarea"
+                                }
+                            ]
+                        }
+                    ]
+                },
+
+                {
+                    "width": "10%",
+                    "source": "establishedOrMaintained",
+                    "type": "selectOne",
+                    "title": "Established or maintained?"
+                },
+                {
+                    "width": "10%",
+                    "source": "numberOfAgreements",
+                    "type": "number",
+                    "title": "Number of agreements"
+                },
+                {
+                    "width": "10%",
+                    "source": "numberOfDaysMaintainingAgreements",
+                    "type": "number",
+                    "title": "Number of days maintaining agreements (if applicable)"
+                },
+                {
+                    "width": "20%",
+                    "title": "Site/s where agreements were established",
+                    "type": "col",
+                    "items": [
+                        {
+                            "source": "agreementSites",
+                            "type": "feature"
+                        },
+                        {
+                            "source": "calculatedAreaCoveredByAgreementsHa",
+                            "type": "number",
+                            "readonly": "readonly",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Please attach mapping details",
+                                    "source": "extraMappingDetails",
+                                    "type": "document"
+                                }
+                            ]
+                        }
+                    ]
+
+                 },
+                {
+                    "width": "15%",
+                    "type": "col",
+                    "title": "Actual area (ha) of site/s agreements",
+                    "helpText": "Enter the actual amount during this reporting period.",
+                    "items": [
+                        {
+                            "source": "areaCoveredByAgreementsHa",
+                            "type": "number",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Reason for actual amount being different to aligned amount",
+                                    "source": "mappingNotAlignedReason",
+                                    "type": "selectOne"
+
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "placeholder": "Please enter the reason/s the actual didn't align with the agreed amount",
+                                    "source": "mappingNotAlignedReason",
+                                    "type": "textarea",
+                                    "rows": 5
+
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "width": "15%",
+                    "type": "col",
+                    "title": "Invoiced area (ha) of site/s agreements",
+                    "helpText": "Enter the amount you will invoice for during this reporting period.",
+                    "items": [
+                        {
+                            "source": "areaOfCoveredByAgreementsInvoicedHa",
+                            "type": "number",
+                            "displayOptions": {
+                                "displayUnits": true
+                            }
+                        },
+
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "preLabel": "Reason for invoiced amount being different to actual amount",
+                                    "source": "invoicedNotActualReason",
+                                    "type": "selectOne"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "row",
+                            "items": [
+                                {
+                                    "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                    "source": "invoicedNotActualComments",
+                                    "type": "textarea",
+                                    "rows": 5
+
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "userAddedRows": true,
+            "source": "agreements",
+            "type": "table"
+        }]
+    }]
+}

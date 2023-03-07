@@ -1,0 +1,371 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "initialOrFollowup",
+                    "constraints": [
+                        "Initial",
+                        "Follow-up"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "clearedSites"
+                },
+
+                {
+                    "computed": {
+                        "expression": "$geom.areaHa(clearedSites)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedDebrisRemovedHa",
+                    "units": "ha"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.lengthKm(clearedSites)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedDebrisRemovedKm",
+                    "units": "km"
+                },
+
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "calculatedDebrisRemovedHa"
+                    },
+                    "dataType": "number",
+                    "units": "ha",
+                    "name": "debrisRemovedHa",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "calculatedDebrisRemovedKm"
+                    },
+                    "dataType": "number",
+                    "units": "km",
+                    "name": "debrisRemovedKm",
+                    "validate": "required,min[0]"
+                },
+
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(debrisRemovedHa, calculatedDebrisRemovedHa, 0.1)) or roundTo(debrisRemovedHa, 2) != roundTo(areaOfRemovedDebrisInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(calculatedDebrisRemovedHa, debrisRemovedHa, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+
+                {
+                    "dataType": "number",
+                    "units": "ha",
+                    "name": "areaOfRemovedDebrisInvoicedHa",
+                    "validate": [
+                        {"rule": "min[0]"},
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "debrisRemovedHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(debrisRemovedHa, 2) != roundTo(areaOfRemovedDebrisInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+
+                {
+                    "dataType": "text",
+                    "name": "debrisType",
+                    "description": "",
+                    "constraints": [
+                        "Building & Industrial waste",
+                        "Domestic waste",
+                        "Green waste",
+                        "Other"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "otherDebrisType",
+                    "description": "if Other",
+                    "behaviour": [{
+                        "condition": "debrisType == \"Other\"",
+                        "type": "visible"
+                    }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "validated": "required,min[0]",
+                    "dataType": "number",
+                    "name": "weightOfDebrisTonnes",
+                    "units": "tonnes"
+                },
+                {
+                    "validated": "required,min[0]",
+                    "dataType": "number",
+                    "name": "volumeRemovedM3",
+                    "units": "m3"
+                }
+            ],
+            "dataType": "list",
+            "name": "debrisRemovalDetails"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Debris removal",
+    "title": "Debris removal",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "columns": [
+                    {
+                        "width": "10%",
+                        "source": "initialOrFollowup",
+                        "title": "Initial or follow-up activity?",
+                        "type": "selectOne"
+                    },
+                    {
+                        "width": "20%",
+                        "title": "Site/s where debris removal was implemented",
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "feature",
+                                "source": "clearedSites"
+                            },
+                            {
+                                "source": "calculatedDebrisRemovedHa",
+                                "readonly": "readonly",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+
+                            },
+                            {
+                                "source": "calculatedDebrisRemovedKm",
+                                "readonly": "readonly",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Please attach mapping details",
+                                        "source": "extraMappingDetails",
+                                        "type": "document"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "15%",
+                        "type": "col",
+                        "title": "Actual area (ha) / length (km) of debris removed",
+                        "helpText": "Enter the amount which were actually removed during this reporting period.",
+                        "items": [
+                            {
+                                "source": "debrisRemovedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "debrisRemovedKm",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for actual being different to mapped amount",
+                                        "source": "mappingNotAlignedReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "mappingNotAlignedComments",
+                                        "type": "textarea",
+                                        "rows": 5
+                                    }
+
+                                ]
+
+
+                            }
+                        ]
+                    },
+
+                    {
+                        "width": "15%",
+                        "type": "col",
+                        "title": "Invoiced area (ha) of debris removed",
+                        "helpText": "Enter the amount you will invoice for during this reporting period.",
+                        "items": [
+                            {
+                                "source": "areaOfRemovedDebrisInvoicedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for invoiced amount being different to actual amount",
+                                        "source": "invoicedNotActualReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "invoicedNotActualComments",
+                                        "type": "textarea",
+                                        "rows": 5
+
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+
+                    {
+                        "width": "20%",
+                        "title": "Type of debris removed",
+                        "type": "col",
+                        "validate": "required",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "debrisType",
+                                        "type": "select2"
+                                    }
+                                ]
+                            },
+                            {
+                                "source": "otherDebrisType",
+                                "type": "text"
+
+                            }
+                        ]
+                    },
+
+                    {
+                        "width": "10%",
+                        "source": "weightOfDebrisTonnes",
+                        "title": "Weight (tonnes) of debris removed",
+                        "type": "number"
+                    },
+                    {
+                        "width": "10%",
+                        "source": "volumeRemovedM3",
+                        "title": "Volume (m3) of debris removed",
+                        "type": "number"
+                    }
+                ],
+                "userAddedRows": true,
+                "source": "debrisRemovalDetails",
+                "type": "table"
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

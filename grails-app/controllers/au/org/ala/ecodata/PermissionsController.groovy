@@ -1,7 +1,10 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
+import org.springframework.http.HttpStatus
+
 import static au.org.ala.ecodata.Status.*
+import static org.apache.http.HttpStatus.*
 
 /**
  * Controller for getting and setting user <-> project
@@ -10,10 +13,16 @@ import static au.org.ala.ecodata.Status.*
  * @see au.org.ala.ecodata.UserPermission
  */
 class PermissionsController {
+
+    static responseFormats = ['json', 'xml']
+
     PermissionService permissionService
     ProjectService projectService
     OrganisationService organisationService
+    HubService hubService
 
+    static allowedMethods = [deleteUserPermission:"POST", addUserWithRoleToHub:"POST", removeUserWithRoleFromHub:"POST", getMembersForHubPerPage:"GET",
+                             getMeritProjectsForUserId:"GET"]
     def index() {
         render([message: "Hello"] as JSON)
     }
@@ -204,6 +213,127 @@ class PermissionsController {
         } else {
             render status: 400, text: 'Required params not provided: userId, role, projectId'
         }
+    }
+
+    def addUserWithRoleToProgram(String userId, String programId, String role) {
+        Program program = Program.findByProgramId(programId)
+        Closure addToProgram = { String userId2, String role2, String programId2 ->
+            permissionService.addUserAsRoleToProgram(userId2, AccessLevel.valueOf(role2), programId2)}
+        Map result = validateAndUpdatePermission(program, programId, role, userId, addToProgram)
+        render status:result.status, text:result.text
+    }
+
+    def removeUserWithRoleFromProgram(String userId, String programId, String role) {
+        Program program = Program.findByProgramId(programId)
+        Closure removeFromProgram = { String userId2, String role2, String programId2 ->
+            permissionService.removeUserAsRoleFromProgram(userId2, AccessLevel.valueOf(role2), programId2)}
+        Map result = validateAndUpdatePermission(program, programId, role, userId, removeFromProgram)
+        render status:result.status, text:result.text
+    }
+
+    def removeUserWithRoleFromManagementUnit(String userId, String managementUnitId, String role) {
+        ManagementUnit mu = ManagementUnit.findByManagementUnitId(managementUnitId)
+        Closure removeFromManagementUnit = { String userId2, String role2, String managementUnitId2 ->
+            permissionService.removeUserAsRoleFromManagementUnit(userId2, AccessLevel.valueOf(role2), managementUnitId2)}
+        Map result = validateAndUpdatePermission(mu, managementUnitId, role, userId, removeFromManagementUnit)
+        render status:result.status, text:result.text
+    }
+
+    def addUserWithRoleToManagementUnit(String userId, String managementUnitId, String role) {
+        ManagementUnit mu = ManagementUnit.findByManagementUnitId(managementUnitId)
+        Closure addToManagementUnit = { String userId2, String role2, String managementUnitId2 ->
+            permissionService.addUserAsRoleToManagementUnit(userId2, AccessLevel.valueOf(role2), managementUnitId2)}
+        Map result = validateAndUpdatePermission(mu, managementUnitId, role, userId, addToManagementUnit)
+        render status:result.status, text:result.text
+    }
+
+
+    def addUserWithRoleToHub() {
+        Map params = request.JSON
+        Hub hub = Hub.findByHubId(params.entityId)
+
+        Closure addToHub= { Map obj ->
+            permissionService.addUserAsRoleToHub(obj)}
+        Map result = validateAndUpdateHubPermission(hub, params, addToHub)
+
+        render status:result.status, text:result.text
+    }
+
+    def removeUserWithRoleFromHub() {
+        Map params = request.JSON
+        Hub hub = Hub.findByHubId(params.entityId)
+
+        Closure removeFromProgram = { Map obj ->
+            permissionService.removeUserRoleFromHub(obj)}
+        Map result = validateAndUpdateHubPermission(hub, params, removeFromProgram)
+        render status:result.status, text:result.text
+    }
+
+    /**
+     * Returns the users and their roles for a hub.
+     * @param id the hubId of the hub.
+     * @return
+     */
+    def getMembersOfProgram(String id) {
+        if (!id) {
+            render status:400, text:'The id parameter must be supplied'
+        }
+        Integer max = params.max as Integer
+        Integer offset = params.offset as Integer
+        String sort = params.sort
+        String order = params.order
+        render permissionService.getMembersOfProgram(id, max, offset, order, sort) as JSON
+    }
+
+    /**
+     * Returns the users and their roles for a hub.
+     * @param id the hubId of the hub.
+     * @return
+     */
+    def getMembersOfManagementUnit(String id) {
+        if (!id) {
+            render status:400, text:'The id parameter must be supplied'
+        }
+        Integer max = params.max as Integer
+        Integer offset = params.offset as Integer
+        String sort = params.sort
+        String order = params.order
+        render permissionService.getMembersOfManagementUnit(id, max, offset, order, sort) as JSON
+    }
+
+
+
+    private Map validateAndUpdatePermission(entity, String entityId, String role, String userId, Closure serviceCall) {
+        Map result = validate(entity, entityId, role, userId)
+
+        if (!result) {
+            result = serviceCall(userId, role, entityId)
+            if (result.status == "ok") {
+                result = [status:200 , text:"success: ${result.id}"]
+            } else {
+                result = [status: 500, text: "Error removing user/role: ${result}"]
+            }
+        }
+        result
+    }
+
+    private Map validate(entity, String entityId, String role, String userId) {
+        Map result
+        if (!entityId || !role || !userId) {
+            result = [status:400, text: 'Required params not provided: userId, role, id']
+        }
+        else if (!entity) {
+            result = [status:404, text: 'Not found']
+        }
+        else {
+            try {
+                AccessLevel.valueOf(role)
+            }
+            catch (Exception e) {
+                result = [status:400, text: 'Invalid role: '+role]
+            }
+        }
+        result
     }
 
     /**
@@ -407,24 +537,74 @@ class PermissionsController {
     }
 
     /**
-     * Get a list of users with {@link AccessLevel#editor editor} level access or higher
+     * Get a list of users with {@link AccessLevel#projectParticipant projectParticipant} level access or higher
      * for a given {@link Project project} (via {@link Project#projectId projectId})
-     *
+     * @params
+     * id - project id
+     * role - optional - filter list of roles to include
      * @return
      */
     def getMembersForProject() {
         String projectId = params.id
+        List<AccessLevel> roles = params.getList("role")?.collect { AccessLevel.valueOf(it) } ?: [AccessLevel.admin, AccessLevel.caseManager, AccessLevel.moderator, AccessLevel.editor, AccessLevel.projectParticipant]
 
         if (projectId) {
             Project project = Project.findByProjectId(projectId)
             if (project) {
-                List members = permissionService.getMembersForProject(projectId)
-                render members as JSON
+                List members = permissionService.getMembersForProject(projectId, roles)
+                render text: members as JSON
             } else {
                 render status: 404, text: "Project not found for projectId: ${projectId}"
             }
         } else {
             render status: 400, text: 'Required path not provided: projectId.'
+        }
+    }
+
+    /**
+     * Get project members, support pagination.
+     * @return project members one page at a time
+     */
+    @RequireApiKey
+    def getMembersForProjectPerPage() {
+        String projectId = params.projectId
+        Integer start = params.getInt('offset')?:0
+        Integer size = params.getInt('max')?:10
+
+        if (projectId){
+            Project project = Project.findByProjectId(projectId)
+            if (project) {
+                Map results = permissionService.getMembersForProjectPerPage(projectId,start,size)
+                render(contentType: 'application/json', text: [ data: results.data, totalNbrOfAdmins: results.totalNbrOfAdmins, recordsTotal: results.count, recordsFiltered: results.count] as JSON)
+            } else {
+                response.sendError(SC_NOT_FOUND, 'Project not found.')
+            }
+        } else {
+            response.sendError(SC_BAD_REQUEST, 'Required path not provided: projectId.')
+        }
+    }
+
+    /**
+     * Get Merit members, support pagination
+     * @return Hub members one page at a time
+     */
+    @RequireApiKey
+    def getMembersForHubPerPage() {
+        String hubId = params.hubId
+        String userId = params.userId
+        Integer start = params.getInt('offset')?:0
+        Integer size = params.getInt('max')?:10
+
+        if (hubId){
+            Hub hub = Hub.findByHubId(hubId)
+            if (hub) {
+                Map results = permissionService.getMembersForHubPerPage(hubId,start,size,userId)
+                render(contentType: 'application/json', text: [ data: results.data, recordsTotal: results.count, recordsFiltered: results.count] as JSON)
+            } else {
+                response.sendError(SC_NOT_FOUND, 'Hub not found.')
+            }
+        } else {
+            response.sendError(SC_BAD_REQUEST, 'Required path not provided: hubId.')
         }
     }
 
@@ -461,7 +641,6 @@ class PermissionsController {
             List out = []
             up.each {
                 Map t = [:]
-                log.debug "it.projectId = ${it.entityId}"
                 t.project = projectService.get(it.entityId, ProjectService.FLAT)
                 t.accessLevel = it.accessLevel
                 if (t.project) out.add t
@@ -541,6 +720,19 @@ class PermissionsController {
         }
     }
 
+    def getUserRolesForUserId() {
+        String userId = params.id
+        if (userId) {
+            List<UserPermission> permissions = UserPermission.findAllByUserIdAndAccessLevelNotEqualAndStatusNotEqual(userId, AccessLevel.starred, DELETED, params)
+            Map result = [roles:permissions.collect { [entityId:it.entityId, entityType:it.entityType, role:it.accessLevel.name()] }]
+
+            render result as JSON
+        } else {
+            render status: 400, text: "Required params not provided: userId"
+        }
+    }
+
+
     /**
      * Get a list of {@link Project projects} with {@link AccessLevel#starred starred} level access
      * for a given {@link UserDetails#userId userId}
@@ -601,6 +793,45 @@ class PermissionsController {
     }
 
     /**
+     * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#moderator moderator}
+     * level access or higher for a comma separated list of {@link Project projects}.
+     *
+     * @return JSON object with a single property representing a boolean value
+     */
+    def canUserModerateProjects() {
+        String userId = params.userId
+        String projectIds = params.projectIds
+
+        if (userId && projectIds) {
+            Map out = [userCanModerate: permissionService.canUserModerateProjects(userId, projectIds)]
+            render out as JSON
+        } else {
+            render status: HttpStatus.BAD_REQUEST, text: 'Required params not provided: userId, projectIds'
+        }
+    }
+
+    /**
+     * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#editor editor}
+     * level access or higher for a list of {@link Project projects}.
+     *
+     * @params projectIds - comma separated list of projects
+     * @params userId
+     *
+     * @return JSON object with a single property representing a boolean value
+     */
+    def isUserEditorForProjects() {
+        String userId = params.userId
+        String projectIds = params.projectIds
+
+        if (userId && projectIds) {
+            Map out = [userIsEditor: permissionService.isUserEditorForProjects(userId, projectIds)]
+            render out as JSON
+        } else {
+            render status: HttpStatus.BAD_REQUEST, text: 'Required params not provided: userId, projectIds'
+        }
+    }
+
+    /**
      * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#editor editor}
      * level access or higher for a given {@link Project project}
      *
@@ -631,15 +862,14 @@ class PermissionsController {
      */
     def canUserEditProjects() {
         String userId = params.userId
-        String [] projectIds = params.projectIds?.split(',')
+        List projectIds = params.projectIds?.split(',')
 
         if (projectIds?.size()) {
             try{
-                Map out =  permissionService.isUserEditorForProjects(userId, projectIds)
+                Map out =  permissionService.isUserAdminForProjects(userId, projectIds)
                 render out as JSON
             } catch (Exception e){
-                log.error(e.message);
-                log.error(e.stackTrace);
+                log.error(e.message, e);
                 render status: 500, text: 'Internal server error'
             }
         } else {
@@ -662,6 +892,75 @@ class PermissionsController {
             if (project) {
                 UserPermission permission = UserPermission.findByUserIdAndEntityIdAndAccessLevel(userId, projectId, AccessLevel.caseManager)
                 render([userIsCaseManager: permission != null] as JSON)
+            } else {
+                render status: 404, text: "Project not found for projectId: ${projectId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, projectId'
+        }
+    }
+
+    /**
+     * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#moderator moderator}
+     * level access for a given {@link Project project}
+     *
+     * @return JSON object with a single property representing a boolean value
+     */
+    def isUserModeratorForProject() {
+        String userId = params.userId
+        String projectId = params.projectId
+
+        if (userId && projectId) {
+            Project project = Project.findByProjectId(projectId)
+            if (project) {
+                UserPermission permission = UserPermission.findByUserIdAndEntityIdAndAccessLevel(userId, projectId, AccessLevel.moderator)
+                render([userIsModerator: permission != null] as JSON)
+            } else {
+                render status: 404, text: "Project not found for projectId: ${projectId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, projectId'
+        }
+    }
+
+    /**
+     * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#caseManager caseManager}
+     * level access for a given {@link Project project}
+     *
+     * @return JSON object with a single property representing a boolean value
+     */
+    def isUserEditorForProject() {
+        String userId = params.userId
+        String projectId = params.projectId
+
+        if (userId && projectId) {
+            Project project = Project.findByProjectId(projectId)
+            if (project) {
+                UserPermission permission = UserPermission.findByUserIdAndEntityIdAndAccessLevel(userId, projectId, AccessLevel.editor)
+                render([userIsEditor: permission != null] as JSON)
+            } else {
+                render status: 404, text: "Project not found for projectId: ${projectId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, projectId'
+        }
+    }
+
+    /**
+     * Does the request {@link UserDetails#userId userId} have {@link AccessLevel#caseManager caseManager}
+     * level access for a given {@link Project project}
+     *
+     * @return JSON object with a single property representing a boolean value
+     */
+    def isUserParticipantForProject() {
+        String userId = params.userId
+        String projectId = params.projectId
+
+        if (userId && projectId) {
+            Project project = Project.findByProjectId(projectId)
+            if (project) {
+                UserPermission permission = UserPermission.findByUserIdAndEntityIdAndAccessLevel(userId, projectId, AccessLevel.projectParticipant)
+                render([userIsParticipant: permission != null] as JSON)
             } else {
                 render status: 404, text: "Project not found for projectId: ${projectId}"
             }
@@ -752,6 +1051,24 @@ class PermissionsController {
         }
     }
 
+    def isUserMemberOfProject() {
+        String userId = params.userId
+        String projectId = params.projectId
+        List<AccessLevel> roles = params.getList("role")?.collect { AccessLevel.valueOf(it) } ?: [AccessLevel.admin, AccessLevel.caseManager, AccessLevel.moderator, AccessLevel.editor, AccessLevel.projectParticipant]
+
+        if (userId && projectId) {
+            Project project = Project.findByProjectId(projectId)
+            if (project) {
+                render ([access: permissionService.isUserMemberOfProject(userId, projectId, roles)] as JSON)
+            } else {
+                render status: 404, text: "Project not found for projectId: ${projectId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, projectId'
+        }
+
+    }
+
     /**
      * Admin function to clear all UserPermissions entries for the
      * specified user.
@@ -835,4 +1152,162 @@ class PermissionsController {
         response.setContentType('application/json; charset="UTF-8"')
         render permissionService.getMembersForOrganisation(id) as JSON
     }
+
+    /**
+     * Returns the users and their roles for a hub.
+     * @param id the hubId of the hub.
+     * @return
+     */
+    def getByHub(String id) {
+        if (!id) {
+            render status:400, text:'The id parameter must be supplied'
+        }
+        render permissionService.getMembersForHub(id) as JSON
+    }
+
+    /**
+     * Admin function to delete all UserPermissions entries for the specific userId for entities
+     * owned by a specific hub.  Currently only used by MERIT.
+     */
+    def deleteUserPermission(String id, String hubId) {
+
+        // This assigns a temporary default for the hubId parameter to retain
+        // backwards compatibility with the previous API version.
+        String defaultHubForPermissionManagement = "merit"
+        if (!hubId) {
+            hubId = hubService.findByUrlPath(defaultHubForPermissionManagement)?.hubId
+        }
+        if (!id || !hubId) {
+            Map error = [error:'The id and hubId are mandatory parameters']
+            response.setStatus(org.apache.http.HttpStatus.SC_BAD_REQUEST)
+            render error as JSON
+        }
+        else {
+            Map results = permissionService.deleteUserPermissionByUserId(id, hubId)
+            render results as JSON
+        }
+    }
+
+    private Map validateAndUpdateHubPermission(entity, Map params, Closure serviceCall) {
+        Map result = validate(entity, params.entityId, params.role, params.userId)
+
+        if (!result) {
+            result = serviceCall(params)
+            if (result?.status == "ok") {
+                result = [status:200 , text:"success: ${result.id}"]
+            } else {
+                result = [status: 500, text: "Error removing user/role: ${result}"]
+            }
+        }
+        result
+    }
+
+    /**
+     * Checks if a user have a role on an existing MERIT project.
+     */
+    def doesUserHaveHubProjects() {
+        String userId = params.userId
+        String hubId = params.entityId
+
+        if (userId && hubId) {
+            render ([doesUserHaveHubProjects: projectService.doesUserHaveHubProjects(userId, hubId)] as JSON)
+        } else {
+            render status: 400, text: "Required params not provided: userId, hubId"
+        }
+    }
+
+    /**
+     * Get the UserPermission details for the given parameters
+     */
+    def findUserPermission() {
+        String userId = params.userId
+        String hubId = params.entityId
+
+        if (userId && hubId) {
+            respond permissionService.findUserPermission(userId, hubId)
+        } else {
+            render status: 400, text: "Required params not provided: userId, hubId"
+        }
+    }
+
+    /**
+     * Add user role to management unit
+     *
+     */
+    def addStarManagementUnitForUser() {
+        String managementUnitId = params.managementUnitId
+        String userId = params.userId
+        AccessLevel role = AccessLevel.starred
+
+        if (userId && managementUnitId) {
+            ManagementUnit managementUnit = ManagementUnit.findByManagementUnitId(managementUnitId)
+            if (managementUnit) {
+                log.debug "addUserAsRoleToManagementunit: ${userId}, ${role}, ${managementUnit}"
+                Map ps = permissionService.addUserAsRoleToManagementUnit(userId, role, managementUnitId)
+                if (ps.status == "ok") {
+                    render "success: ${ps.id}"
+                } else {
+                    render status: 500, text: "Error adding editor: ${ps}"
+                }
+            } else {
+                render status: 404, text: "ManagementUnit not found for managementUnitId: ${managementUnitId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, managementUnitId.'
+        }
+    }
+
+    /**
+     * Delete user role from management unit
+     *
+     */
+    def removeStarManagementUnitForUser() {
+        String managementUnitId = params.managementUnitId
+        String userId = params.userId
+        AccessLevel role = AccessLevel.starred
+
+        if (userId && managementUnitId) {
+            ManagementUnit managementUnit = ManagementUnit.findByManagementUnitId(managementUnitId)
+            if (managementUnit) {
+                Map ps = permissionService.removeUserAsRoleFromManagementUnit(userId, role, managementUnitId)
+                if (ps && ps.status == "ok") {
+                    render "success: ${ps.id}"
+                } else if (ps) {
+                    render status: 500, text: "Error removing star: ${ps}"
+                } else {
+                    render status: 404, text: "ManagementUnit: ${managementUnitId} not starred for userId: ${userId}"
+                }
+            } else {
+                render status: 404, text: "ManagementUnit not found for managementUnitId: ${managementUnitId}"
+            }
+        } else {
+            render status: 400, text: 'Required params not provided: userId, managementUnitId.'
+        }
+    }
+
+    /**
+     * Does a given {@link Project project} have {@link AccessLevel#starred starred} level access
+     * for a given {@link UserDetails#userId userId}
+     *
+     * @return
+     */
+    def isManagementUnitStarredByUser() {
+        String userId = params.userId
+        String managementUnitId = params.managementUnitId
+
+        if (userId && managementUnitId) {
+            ManagementUnit managementUnit = ManagementUnit.findByManagementUnitId(managementUnitId)
+            if (managementUnit) {
+                List<UserPermission> permissions = UserPermission.findAllByUserIdAndEntityIdAndEntityTypeAndAccessLevel(userId, managementUnitId, ManagementUnit.class.name, AccessLevel.starred)
+                Map outMap = [isManagementUnitStarredByUser: !permissions.isEmpty()]
+                render outMap as JSON
+            } else {
+                render status: 404, text: "ManagementUnit not found for managementUnitId: ${managementUnitId}"
+            }
+
+        } else {
+            render status: 400, text: "Required params not provided: id, managementUnitId."
+        }
+    }
+
 }

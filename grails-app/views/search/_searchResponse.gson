@@ -1,0 +1,18 @@
+import au.org.ala.ecodata.mapper.ElasticSearchBackwardsCompatibilityMapper
+import org.elasticsearch.action.search.SearchResponse
+
+model {
+    SearchResponse searchResponse
+}
+
+/** Renders a SearchResponse into the format expected by BioCollect and MERIT */
+json {
+
+    hits {
+        total searchResponse.hits?.totalHits?.value
+        hits tmpl.searchHit(searchResponse.hits?.hits as List)
+    }
+
+    facets ElasticSearchBackwardsCompatibilityMapper.mapAggregations(searchResponse.aggregations)
+
+}

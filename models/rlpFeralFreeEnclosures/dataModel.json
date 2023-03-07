@@ -1,0 +1,373 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "newOrMaintained",
+                    "constraints": [
+                        "Newly established",
+                        "Maintained"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "number",
+                    "name": "numberOfEnclosures",
+                    "validate": "required"
+                },
+                {
+                    "dataType": "number",
+                    "name": "daysSpentOnMaintenanceOfEnclosures",
+                    "description": "Number of days should be calculated as number of days by number of people (eg. 4.5 days by 3 people is 13.5 days)",
+                    "validate": "min[0]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "siteOfEnclosures"
+                },
+                {
+                    "dataType": "number",
+                    "name": "calculatedAreaOfEnclosuresHa",
+                    "computed": {
+                        "expression": "$geom.areaHa(siteOfEnclosures)"
+                    },
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(siteOfEnclosures)"
+                    },
+                    "dataType": "number",
+                    "name": "areaOfEnclosuresHa",
+                    "units": "ha",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaInvoicedHa",
+                    "units": "ha",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaOfEnclosuresHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not within(areaOfEnclosuresHa, calculatedAreaOfEnclosuresHa, 0.1)",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaOfEnclosuresHa, 2) != roundTo(areaInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not within(areaOfEnclosuresHa, calculatedAreaOfEnclosuresHa, 0.1) or roundTo(areaOfEnclosuresHa, 2) != roundTo(areaInvoicedHa, 2)",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "columns": [
+                        {
+                            "dataType": "species",
+                            "name": "protectedSpecies",
+                            "dwcAttribute": "scientificName",
+                            "description": "The threatened species protected by the enclosure",
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "targetFeralSpecies",
+                            "description": "",
+                            "validate": "required,maxSize[300]"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "individualsOrPopulations",
+                            "constraints": [
+                                "Individuals",
+                                "Populations"
+                            ],
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "number",
+                            "name": "numberOfPopulationsOrIndividualsProtected",
+                            "validate": "required,min[0]"
+                        }
+                    ],
+                    "dataType": "list",
+                    "name": "speciesProtected"
+                }
+            ],
+            "dataType": "list",
+            "name": "enclosureDetails"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Maintaining feral free enclosures",
+    "title": "Establishing and maintaining feral-free enclosures",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "addRowText": "Add a new feral free area",
+                "userAddedRows": true,
+                "source": "enclosureDetails",
+                "type": "repeat",
+                "items": [
+                    {
+                        "type": "row",
+                        "css": "border-bottom",
+                        "items": [
+                            {
+                                "preLabel": "Newly established or maintained feral free enclosure?",
+                                "css": "span4",
+                                "source": "newOrMaintained",
+                                "type": "selectOne"
+                            },
+                            {
+                                "preLabel": "Number of feral free enclosures",
+                                "css": "span3",
+                                "source": "numberOfEnclosures",
+                                "type": "number"
+                            },
+                            {
+                                "preLabel": "Number of days maintaining feral-free enclosures",
+                                "css": "span3",
+                                "source": "daysSpentOnMaintenanceOfEnclosures",
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "row",
+                        "items": [
+                            {
+                                "type": "col",
+                                "css": "span3 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Site/s of feral free enclosures",
+                                                "source": "siteOfEnclosures",
+                                                "type": "feature"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type":"number",
+                                        "readonly": "readonly",
+                                        "source": "calculatedAreaOfEnclosuresHa",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Please attach mapping details",
+                                                "source": "extraMappingDetails",
+                                                "type": "document"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Actual area (ha) of feral-free enclosures",
+                                                "source": "areaOfEnclosuresHa",
+                                                "type": "number",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for actual being different to mapped amount",
+                                                "source": "mappingNotAlignedReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "mappingNotAlignedComments",
+                                                "type": "textarea",
+                                                "rows": 5
+                                            }
+
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Invoiced area (ha) of feral-free enclosures",
+                                                "source": "areaInvoicedHa",
+                                                "type": "number",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for invoiced amount being different to actual amount",
+                                                "source": "invoicedNotActualReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "invoicedNotActualComments",
+                                                "type": "textarea",
+                                                "rows": 5
+
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "addRowText": "Add a species",
+                        "columns": [
+                            {
+                                "width": "35%",
+                                "source": "protectedSpecies",
+                                "title": "Targeted species being protected",
+                                "type": "speciesSelect"
+                            },
+                            {
+                                "width": "40%",
+                                "source": "targetFeralSpecies",
+                                "title": "Targeted feral species being controlled",
+                                "type": "text"
+                            },
+                            {
+                                "width": "15%",
+                                "source": "individualsOrPopulations",
+                                "title": "Individuals or populations?",
+                                "type": "selectOne"
+                            },
+                            {
+                                "width": "10%",
+                                "source": "numberOfPopulationsOrIndividualsProtected",
+                                "title": "Number of populations (or individuals) protected within feral free enclosures",
+                                "type": "number"
+                            }
+                        ],
+                        "userAddedRows": true,
+                        "source": "speciesProtected",
+                        "type": "table"
+                    }
+                ]
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

@@ -1,5 +1,6 @@
 package au.org.ala.ecodata
 
+import au.org.ala.ecodata.metadata.OutputMetadata
 import au.org.ala.ecodata.metadata.OutputUploadTemplateBuilder
 import au.org.ala.web.AlaSecured
 import grails.converters.JSON
@@ -19,22 +20,12 @@ class MetadataController {
         render metadataService.activitiesList(params.program, params.subprogram) as JSON
     }
 
-    @RequireApiKey
-    @AlaSecured("ROLE_ADMIN")
-    def updateActivitiesModel() {
-        def model = request.JSON
-        //log.debug "Model=${model.getClass()}"
-        metadataService.updateActivitiesModel(model.model.toString(4))
-        def result = [model: metadataService.activitiesModel()]
-        render result as JSON
-    }
-
     def programsModel() {
         render metadataService.programsModel()
     }
 
     @RequireApiKey
-    @AlaSecured("ROLE_ADMIN")
+    @AlaSecured(["ROLE_ADMIN"])
     def updateProgramsModel() {
         def model = request.JSON
         metadataService.updateProgramsModel(model.model.toString(4))
@@ -54,18 +45,6 @@ class MetadataController {
         } else {
             render result
         }
-    }
-
-    @RequireApiKey
-    @AlaSecured("ROLE_ADMIN")
-    def updateOutputDataModel(String id) {
-        //log.debug "id=${id}"
-        def model = request.JSON
-        def modelStr = model.model.toString(4);
-        //log.debug "modelStr = ${modelStr}"
-        metadataService.updateOutputDataModel(modelStr, id)
-        def result = [model: metadataService.getOutputDataModel(id)]
-        render result as JSON
     }
 
     // Return the Nvis classes for the supplied location. This is an interim solution until the spatial portal can be fixed to handle
@@ -134,6 +113,7 @@ class MetadataController {
             return null
         }
 
+        Map model = metadataService.getOutputDataModelByName(outputName)
         def annotatedModel = null
         if (expandList && expandList == 'true') {
             annotatedModel = metadataService.annotatedOutputDataModel(outputName, true)
@@ -146,13 +126,11 @@ class MetadataController {
             return null
         }
 
-        def fileName = outputName
+        String fileName = model.title ?: outputName
 
         if (listName) {
-            def listModel = annotatedModel.find { it.name == listName }
-            if (listModel.description) {
-                fileName += " - ${listModel.description}"
-            }
+            OutputMetadata outputMetadata = new OutputMetadata([dataModel:annotatedModel])
+            Map listModel = outputMetadata.findDataModelItemByName(listName)
             annotatedModel = listModel?.columns
         }
 
@@ -284,7 +262,7 @@ class MetadataController {
     }
 
     def getGeographicFacetConfig() {
-        render grailsApplication.config.app.facets.geographic as JSON
+        render grailsApplication.config.getProperty('app.facets.geographic', Map) as JSON
     }
 
     /**
@@ -301,5 +279,19 @@ class MetadataController {
         render scoreMaps as JSON
     }
 
+    def getUniqueDataTypes(){
+        List datatypes = metadataService.getUniqueDataTypes()
+        render( text: datatypes as JSON, contentType: 'application/json')
+    }
+
+    def getIndicesForDataModels(){
+        Map indices = metadataService.getIndicesForDataModels()
+        render( text: indices as JSON, contentType: 'application/json')
+    }
+
+    /** Returns all Services, including associated Scores based on the forms assocaited with each service */
+    def services() {
+        render metadataService.getServiceList() as JSON
+    }
 
 }

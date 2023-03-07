@@ -2,13 +2,21 @@ package au.org.ala.ecodata
 import au.org.ala.ecodata.reporting.ProjectXlsExporter
 import au.org.ala.ecodata.reporting.XlsExporter
 import grails.converters.JSON
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.media.Schema
+import io.swagger.v3.oas.annotations.responses.ApiResponse
 
 import static au.org.ala.ecodata.ElasticIndex.HOMEPAGE_INDEX
+import static io.swagger.v3.oas.annotations.enums.ParameterIn.QUERY
 
 class ProjectController {
 
     def projectService, siteService, commonService, reportService, metadataService, reportingService, activityService, userService
     ElasticSearchService elasticSearchService
+    ManagementUnitService managementUnitService
+    OrganisationService organisationService
+    ProgramService programService
 
     static final BRIEF = 'brief'
     static final RICH = 'rich'
@@ -18,7 +26,7 @@ class ProjectController {
     // for universal JSONP support.
     def asJson = { model ->
         response.setContentType("application/json;charset=UTF-8")
-        model
+        render model as JSON
     }
 
 	static ignore = ['action','controller','id']
@@ -27,6 +35,35 @@ class ProjectController {
         render "${Project.count()} sites"
     }
 
+    @Operation(
+            method = "GET",
+            tags = "project",
+            operationId = "projectList",
+            summary = "Get Project list",
+            description = "Get Project list",
+            parameters = [
+                    @Parameter(name = "brief",
+                            in = QUERY,
+                            required = false,
+                            description = "project name"),
+                    @Parameter(name = "includeDeleted",
+                            in = QUERY,
+                            required = false,
+                            description = "include Deleted projects",
+                            schema = @Schema(type = "boolean")),
+                    @Parameter(name = "citizenScienceOnly",
+                            in = QUERY,
+                            required = false,
+                            description = "citizen Science projects Only",
+                            schema = @Schema(type = "boolean"))
+            ],
+            responses = [
+                    @ApiResponse(
+                            description = "Project list",
+                            responseCode = "200"
+                    )
+            ]
+    )
     def list() {
         println 'brief = ' + params.brief
         def list = projectService.list(params.brief, params.includeDeleted, params.citizenScienceOnly)
@@ -48,6 +85,7 @@ class ProjectController {
         if (params.view == RICH) { levelOfDetail << RICH }
         if (params.view == ProjectService.ALL) { levelOfDetail = ProjectService.ALL }
         if (params.view == ProjectService.OUTPUT_SUMMARY) {levelOfDetail = ProjectService.OUTPUT_SUMMARY}
+        if (params.view == ProjectService.PRIVATE_SITES_REMOVED) {levelOfDetail << ProjectService.PRIVATE_SITES_REMOVED}
         if (!id) {
             def list = projectService.list(levelOfDetail, includeDeleted, citizenScienceOnly)
             list.sort {it.name}
@@ -56,6 +94,7 @@ class ProjectController {
             def p = params?.version ?
                     AuditMessage.findAllByProjectIdAndEntityTypeAndDateLessThanEquals(id, Project.class.name, new Date(params.version as Long), [sort:'date', order:'desc', max: 1])[0].entity :
                     Project.findByProjectId(id)
+
             if (p) {
 
                 withFormat {
@@ -76,12 +115,22 @@ class ProjectController {
             }
         }
     }
+    /**
+     * Returns a the List of services being delivered by this project with target information for each score.
+     * @param projectId the projectId of the project
+     * @return
+     */
+
+    def getProjectServicesWithTargets(String id){
+        def result = projectService.getProjectServicesWithTargets(id)
+        render result as JSON
+    }
 
     def asXlsx(project) {
 
         XlsExporter exporter = new XlsExporter(URLEncoder.encode(project.name, 'UTF-8'))
         exporter.setResponseHeaders(response)
-        ProjectXlsExporter projectExporter = new ProjectXlsExporter(projectService, exporter)
+        ProjectXlsExporter projectExporter = new ProjectXlsExporter(projectService, exporter, managementUnitService, organisationService, programService)
         projectExporter.export(project)
         exporter.sizeColumns()
 
@@ -89,7 +138,7 @@ class ProjectController {
     }
 
     def asShapefile(project) {
-        if (siteService.findAllForProjectId(project.projectId)) {
+        if (siteService.doesProjectHaveSite(project.projectId)) {
             def name = 'projectSites'
             response.setContentType("application/zip")
             response.setHeader("Content-disposition", "filename=${name}.zip")
@@ -157,7 +206,7 @@ class ProjectController {
     def updateSites(String id){
         log.debug("Updating the sites for projectID : " + id)
         def props = request.JSON
-        log.debug props
+        log.debug "${props}"
         def allCurrentSites = []
         Site.findAllByProjects(id).each{
           allCurrentSites << it.siteId
@@ -187,9 +236,11 @@ class ProjectController {
     @RequireApiKey
     def update(String id) {
         def props = request.JSON
-        log.debug props
+        log.debug "${props}"
         def result
         def message
+
+
         if (id) {
             result = projectService.update(props,id)
             message = [message: 'updated']
@@ -201,7 +252,7 @@ class ProjectController {
             setResponseHeadersForProjectId(response, result.projectId)
             asJson(message)
         } else {
-            log.error result.error
+            log.error result.error.toString()
             render status:400, text: result.error
         }
     }
@@ -225,10 +276,10 @@ class ProjectController {
                 xlsx {
                     XlsExporter exporter = new XlsExporter("results")
                     exporter.setResponseHeaders(response)
-                    ProjectXlsExporter projectExporter = new ProjectXlsExporter(projectService, exporter)
+                    ProjectXlsExporter projectExporter = new ProjectXlsExporter(projectService, exporter, managementUnitService, organisationService, programService)
 
                     List projects = ids.collect{projectService.get(it,ProjectService.ALL)}
-                    projectExporter.exportAll(projects)
+                    projectExporter.exportAllProjects(projects)
                     exporter.sizeColumns()
 
                     exporter.save(response.outputStream)
@@ -239,12 +290,38 @@ class ProjectController {
 
     def projectMetrics(String id) {
 
-        // TODO this is temporarily hardcoded, but we can maybe define a meta model for reporting
-        // Need to add targets to this also.
         def p = Project.findByProjectId(id)
 
+        boolean approvedOnly = true
+        boolean targetsOnly = false
+        boolean includeTargets = true
+        List scoreIds
+        Map aggregationConfig = null
+
+        Map paramData = request.JSON
+        if (!paramData) {
+            approvedOnly = params.getBoolean('approvedOnly')
+            scoreIds = params.getList('scoreIds')
+            targetsOnly = params.getBoolean('targetsOnly')
+            includeTargets = params.getBoolean('includeTargets', true)
+        }
+        else {
+
+            if (paramData.approvedOnly != null) {
+                approvedOnly = paramData.approvedOnly
+            }
+            if (paramData.targetsOnly != null) {
+                approvedOnly = paramData.targetsOnly
+            }
+            if (paramData.includeTargets != null) {
+                includeTargets = paramData.includeTargets
+            }
+            scoreIds = paramData.scoreIds
+            aggregationConfig = paramData.aggregationConfig
+        }
+
         if (p) {
-            render projectService.projectMetrics(id) as JSON
+            render projectService.projectMetrics(id, targetsOnly, approvedOnly, scoreIds, aggregationConfig, includeTargets) as JSON
 
         } else {
             render (status: 404, text: 'No such id')
@@ -276,6 +353,32 @@ class ProjectController {
     }
 
     @RequireApiKey
+    def findByAssociation(String entity, String id) {
+        List projects = projectService.findAllByAssociation(entity+"Id", id, params.view ?: ProjectService.BRIEF) ?: []
+
+        Map result = [count:projects.size(), projects:projects]
+        render result as JSON
+    }
+
+    @Operation(
+            method = "GET",
+            tags = "project",
+            operationId = "findProjectByName",
+            summary = "Find Project By Name",
+            description = "Find Project By Name",
+            parameters = [
+                    @Parameter(name = "projectName",
+                    in = QUERY,
+                    required = true,
+                    description = "project name")
+            ],
+            responses = [
+                    @ApiResponse(
+                            description = "Project Details",
+                            responseCode = "200"
+                    )
+            ]
+    )
     def findByName() {
         if (!params.projectName) {
             render status:400, text: "projectName is a required parameter"
@@ -321,7 +424,7 @@ class ProjectController {
      * @return
      */
     def getScienceTypes(){
-        List scienceTypes = grailsApplication.config.biocollect.scienceType
+        List scienceTypes = grailsApplication.config.getProperty('biocollect.scienceType', List)
         render(text:  scienceTypes as JSON, contentType: 'application/json')
     }
 
@@ -330,7 +433,7 @@ class ProjectController {
      * @return
      */
     def getEcoScienceTypes(){
-        List ecoScienceTypes = grailsApplication.config.biocollect.ecoScienceType
+        List ecoScienceTypes = grailsApplication.config.getProperty('biocollect.ecoScienceType', List)
         render(text:  ecoScienceTypes as JSON, contentType: 'application/json')
     }
 
@@ -339,7 +442,7 @@ class ProjectController {
      * @return
      */
     def getUNRegions(){
-        List regions = grailsApplication.config.uNRegions
+        List regions = grailsApplication.config.getProperty('uNRegions', List)
         render( text: regions as JSON, contentType: 'application/json' )
     }
 
@@ -348,7 +451,7 @@ class ProjectController {
      * @return
      */
     def getCountries(){
-        List countries = grailsApplication.config.countries
+        List countries = grailsApplication.config.getProperty('countries', List)
         render( text: countries as JSON, contentType: 'application/json' )
     }
 
@@ -358,17 +461,13 @@ class ProjectController {
      * @return
      */
     def getDataCollectionWhiteList(){
-        List dataCollectionWhiteList = grailsApplication.config.biocollect.dataCollectionWhiteList
+        List dataCollectionWhiteList = grailsApplication.config.getProperty('biocollect.dataCollectionWhiteList', List)
         render( text: dataCollectionWhiteList as JSON, contentType: 'application/json' )
     }
 
-    /**
-     * Get list of facets for homepage index i.e. index used to search projects
-     * @return
-     */
-    def getBiocollectFacets(){
-        List projectFacets = grailsApplication.config.biocollect.facets.project
-        render( text: [facets: projectFacets] as JSON, contentType: 'application/json' )
+    def getDefaultFacets(){
+        List facets = grailsApplication.config.getProperty('facets.project', List)
+        render text: facets as JSON, contentType: 'application/json'
     }
 
     private Map buildParams(Map params){
@@ -384,9 +483,17 @@ class ProjectController {
     }
 
     private def setResponseHeadersForProjectId(response, projectId){
-        response.addHeader("content-location", grailsApplication.config.grails.serverURL + "/project/" + projectId)
-        response.addHeader("location", grailsApplication.config.grails.serverURL + "/project/" +  projectId)
+        response.addHeader("content-location", grailsApplication.config.getProperty('grails.serverURL') + "/project/" + projectId)
+        response.addHeader("location", grailsApplication.config.getProperty('grails.serverURL') + "/project/" +  projectId)
         response.addHeader("entityId", projectId)
+    }
+
+    /**
+     * @link ProjectService#scoreDataForActivityAndProject(String, String)
+     */
+    def scoreDataForActivityAndProject(String id) {
+        def result = projectService.scoreDataForActivityAndProject(id)
+        render result as JSON
     }
 
 }

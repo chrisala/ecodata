@@ -1,24 +1,32 @@
 package au.org.ala.ecodata
+
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.servlet.mvc.GrailsParameterMap
+import grails.core.GrailsApplication
+import org.apache.commons.io.FilenameUtils
+import grails.web.servlet.mvc.GrailsParameterMap
+import org.apache.http.HttpStatus
 import org.elasticsearch.action.search.SearchResponse
+import org.elasticsearch.search.SearchHit
+import org.springframework.web.multipart.MultipartFile
+import org.springframework.web.multipart.MultipartHttpServletRequest
 
 import static au.org.ala.ecodata.ElasticIndex.PROJECT_ACTIVITY_INDEX
 import static au.org.ala.ecodata.Status.ACTIVE
 
 class DocumentController {
 
-    def documentService
+    DocumentService documentService
     ElasticSearchService elasticSearchService
+    GrailsApplication grailsApplication
 
-    static allowedMethods = [save: "POST", update: "POST", delete: "DELETE", search:"POST", listImages: "POST"]
+    static allowedMethods = [save: "POST", update: "POST", delete: "DELETE", search:"POST", listImages: "POST", download: "GET"]
 
     // JSON response is returned as the unconverted model with the appropriate
     // content-type. The JSON conversion is handled in the filter. This allows
     // for universal JSONP support.
     def asJson = { model ->
-        response.setContentType("application/json; charset=UTF-8")
-        model
+    //    response.setContentType("application/json; charset=UTF-8")
+        render model as JSON
     }
 
     def index() {
@@ -40,7 +48,7 @@ class DocumentController {
             //log.debug list
             asJson([list: list])
         } else {
-            def list = documentService.getAll(params.includeDeleted as boolean, params.view)
+            def list = documentService.getAll(params.boolean('includeDeleted'), params.view)
             list.sort {it.name}
             //log.debug list
             asJson([list: list])
@@ -55,7 +63,7 @@ class DocumentController {
                 response.status = 404
                 render status:404, text: 'No such id'
             } else {
-                String path = "${grailsApplication.config.app.file.upload.path}${File.separator}${document.filepath}${File.separator}${document.filename}"
+                String path = "${grailsApplication.config.getProperty('app.file.upload.path')}${File.separator}${document.filepath}${File.separator}${document.filename}"
 
                 File file = new File(path)
 
@@ -153,26 +161,30 @@ class DocumentController {
      */
     @RequireApiKey
     def update(String id) {
-        def props, file = null
+        def props = null
         def stream = null
-        if (request.respondsTo('getFile')) {
-            Map files = request.getFileMap()
-            if (files.size() > 1) {
-                render status:400, text: 'Only one file can be attached'
-                return
-            }
+        if (request instanceof MultipartHttpServletRequest) {
+            MultipartHttpServletRequest multipartRequest = (MultipartHttpServletRequest)request
+            Iterator<String> names = multipartRequest.getFileNames()
+            if (names.hasNext()) {
 
-            file = files.values()[0]
-            props = JSON.parse(params.document)
-            if (!props.contentType && file) {
-               props.contentType = file.contentType
+                MultipartFile file = multipartRequest.getFile(names.next())
+                props = JSON.parse(params.document)
+                if (!props.contentType && file) {
+                    props.contentType = file.contentType
+                }
+                stream = file?.inputStream
+
+                if (names.hasNext()) {
+                    render status:400, text: 'Only one file can be attached'
+                    return
+                }
             }
-            stream = file?.inputStream
         }
         else {
             props = request.JSON
             if (props.content) {
-                stream = new StringReader(props.content)
+                stream = new ByteArrayInputStream(props.content.getBytes('UTF-8'))
                 props.remove('content')
             }
         }
@@ -191,7 +203,7 @@ class DocumentController {
             render message as JSON
         } else {
             //Document.withSession { session -> session.clear() }
-            log.error result.error
+            log.error result.error.toString()
             render status:400, text: result.error
         }
     }
@@ -200,17 +212,19 @@ class DocumentController {
      * Serves up a file named by the supplied filename HTTP parameter.  It is mostly as a convenience for development
      * as the files will be served by Apache in prod.
      */
-    def download() {
+    @RequireApiKey
+    def download(String path, String filename) {
 
-        if (!params.filename) {
-            response.status = 400
+        if (!filename || !documentService.validateDocumentFilePath(path, filename)) {
+            response.status = HttpStatus.SC_BAD_REQUEST
             return null
         }
 
-        File file = new File(documentService.fullPath('', params.filename))
+        String fullPath = documentService.fullPath(path, filename)
+        File file = new File(fullPath)
 
         if (!file.exists()) {
-            response.status = 404
+            response.status = HttpStatus.SC_NOT_FOUND
             return null
         }
 
@@ -222,6 +236,47 @@ class DocumentController {
         response.outputStream.flush()
 
         return null
+    }
+
+
+
+    /**
+     * Creates and returns a thumbnail of the supplied image.  The image orientation will be automatically corrected if needed.
+     * @param image the image to create a thumbnail of.
+     * @param size (optional) the size in pixels of the thumbnail to create.  Defaults to 300.
+     * @return the thumbnail image
+     */
+    def createThumbnail() {
+        if (!request.respondsTo('getFile')) {
+            render status:400, text:'An image file must be supplied'
+            return
+        }
+        else {
+
+            MultipartHttpServletRequest multipartRequest = (MultipartHttpServletRequest)request
+            MultipartFile file = multipartRequest.getFile('image')
+
+            File tmp = File.createTempFile("tmp", "."+FilenameUtils.getExtension(file.originalFilename))
+            new FileOutputStream(tmp).withStream { it << file.inputStream }
+
+            File processedFile = File.createTempFile("processed", "."+FilenameUtils.getExtension(file.originalFilename))
+            boolean processed = ImageUtils.reorientImage(tmp, processedFile)
+            File source = processed ? processedFile : tmp
+            File thumb = File.createTempFile("thumbnail_"+file.originalFilename, "."+FilenameUtils.getExtension(file.originalFilename))
+            ImageUtils.makeThumbnail(source, thumb, params.getInt('size', 300))
+
+            response.setContentType(file.contentType)
+            thumb.withInputStream { inputStream ->
+                response.outputStream << inputStream
+                response.outputStream.flush()
+            }
+            tmp.delete()
+            thumb.delete()
+            if (processedFile.exists()) {
+                processedFile.delete()
+            }
+
+        }
     }
 
     /**
@@ -277,14 +332,14 @@ class DocumentController {
         elasticSearchService.buildProjectActivityQuery(params)
         SearchResponse results = elasticSearchService.search(params.query, params, PROJECT_ACTIVITY_INDEX);
         activityIds = results?.hits?.hits?.collect { document ->
-            document.source.activityId
+            document.sourceAsMap.activityId
         }
-        results?.hits?.hits?.each { document ->
-            activityMetadata[document.source.activityId] = [
-                    activityId: document.source.activityId,
-                    activityName: document.source.name,
-                    projectId: document.source.projectActivity.projectId,
-                    projectName: document.source.projectActivity.projectName
+        results?.hits?.hits?.each { SearchHit document ->
+            activityMetadata[document.sourceAsMap.activityId] = [
+                    activityId: document.sourceAsMap.activityId,
+                    activityName: document.sourceAsMap.name,
+                    projectId: document.sourceAsMap.projectActivity.projectId,
+                    projectName: document.sourceAsMap.projectActivity.projectName
             ]
         }
 
@@ -296,7 +351,7 @@ class DocumentController {
             }
         }
 
-        documentResult = [documents: searchResults?.documents, total: results.hits?.totalHits()]
+        documentResult = [documents: searchResults?.documents, total: results.hits?.totalHits.value]
         documentResult
     }
 

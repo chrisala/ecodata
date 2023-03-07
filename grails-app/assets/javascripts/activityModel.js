@@ -14,6 +14,7 @@ var ActivityModel = function (act, model) {
     self.gmsId = ko.observable(act.gmsId);
     self.supportsSites = ko.observable(act.supportsSites);
     self.supportsPhotoPoints = ko.observable(act.supportsPhotoPoints);
+    self.minOptionalSectionsCompleted = ko.observable(act.minOptionalSectionsCompleted || 1);
 
     self.outputs.subscribe(function () {
         self.initialiseOutputConfig();
@@ -340,7 +341,7 @@ var ActivityModelViewModel = function (model, options) {
         var model = ko.toJS(self);
         $.ajax(config.activityModelUpdateUrl, {
             type: 'POST',
-            data: vkbeautify.json(model, 2),
+            data: JSON.stringify(model, null, 2),
             contentType: 'application/json',
             success: function (data) {
                 if (data !== 'error') {

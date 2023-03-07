@@ -8,8 +8,8 @@ class ProjectActivityController {
     def projectActivityService
 
     def asJson = { model ->
-        response.setContentType("application/json;charset=UTF-8")
-        model
+        //response.setContentType("application/json;charset=UTF-8")
+        render model as JSON
     }
 
     /**
@@ -22,6 +22,12 @@ class ProjectActivityController {
         if (id) {
             def list = []
             list.addAll(projectActivityService.getAllByProject(id, params.view, params?.version))
+            if( params.getBoolean('stats', false) ){
+                list.each { pActivity ->
+                    projectActivityService.addProjectActivityStats(pActivity)
+                }
+            }
+
             asJson([list: list])
         } else {
             response.status = 404
@@ -41,6 +47,10 @@ class ProjectActivityController {
             result = [status: 404, text: 'No such id'];
         } else {
             result = projectActivityService.get(id, params.view, params?.version)
+            if( params.getBoolean('stats', false) ){
+                projectActivityService.addProjectActivityStats(result)
+            }
+
             if (!result) {
                 result = [status: 404, text: 'Invalid id'];
             }
@@ -85,7 +95,7 @@ class ProjectActivityController {
     @RequireApiKey
     def update(String id) {
         def props = request.JSON
-        log.debug props
+        log.debug "${props}"
         def result
         def message
         if (id) {
@@ -98,7 +108,7 @@ class ProjectActivityController {
         if (result.status == 'ok') {
             asJson(message)
         } else {
-            log.error result.error
+            log.error result.error.toString()
             render status: 400, text: result.error
         }
     }
@@ -114,4 +124,27 @@ class ProjectActivityController {
         render projectActivityService.getAllByProject(id) as JSON
     }
 
+    /**
+     * Request body should be JSON formatted of the form:
+     * {
+     *     "property1":value1,
+     *     "property2":value2,
+     *     etc
+     * }
+     * where valueN may be a primitive type or array.
+     * The criteria are ANDed together.
+     * If a property is supplied that isn't a property of the project activity, it will not cause
+     * an error, but no results will be returned.  (this is an effect of mongo allowing
+     * a dynamic schema)
+     *
+     * @return a list of the project activity that match the supplied criteria
+     */
+    @RequireApiKey
+    def search() {
+        def searchCriteria = request.JSON
+
+        def view = searchCriteria.remove('view') ?: ""
+        def projectActivityList = projectActivityService.search(searchCriteria, view)
+        asJson projectActivities: projectActivityList
+    }
 }

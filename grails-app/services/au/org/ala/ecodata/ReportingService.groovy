@@ -3,7 +3,7 @@ package au.org.ala.ecodata
 import au.org.ala.ecodata.reporting.AggregationResult
 import au.org.ala.ecodata.reporting.AggregatorFactory
 import au.org.ala.ecodata.reporting.AggregatorIf
-import grails.transaction.Transactional
+import grails.gorm.transactions.Transactional
 import grails.validation.ValidationException
 
 import static au.org.ala.ecodata.Status.*
@@ -13,30 +13,39 @@ import static au.org.ala.ecodata.Status.*
  */
 @Transactional
 class ReportingService {
+    static transactional = true
 
     def permissionService, userService, activityService, commonService
 
     AggregatorFactory aggregatorFactory = new AggregatorFactory()
 
+    private String INVALID_STATUS_FOR_UPDATE_ERROR_KEY = 'report.cannotUpdateSubmittedOrApprovedReport'
+
     def get(String reportId, includeDeleted = false) {
+
+        Report report = null
         if (includeDeleted) {
-            return Report.findByReportId(reportId)
+            report = Report.findByReportId(reportId)
         }
-        Report report = Report.findByReportIdAndStatusNotEqual(reportId, DELETED)
-        if (report.isActivityReport()) {
-            report.activityCount = getActivityCountForReport(report)
+        else {
+            report = Report.findByReportIdAndStatusNotEqual(reportId, DELETED)
         }
+
+        populateActivityInformation([report])
         report
     }
 
     Map toMap(Report report, levelOfDetail = []) {
-        def dbo = report.dbo
-        def mapOfProperties = dbo.toMap()
+        def mapOfProperties = GormMongoUtil.extractDboProperties(report.getProperty("dbo"))
+      //  def mapOfProperties = dbo.toMap()
         mapOfProperties.findAll {k,v -> v != null}
+        //GormMongoUtil.deepPrune(mapOfProperties)
     }
 
-    def findAllForProject(String projectId) {
-        Report.findAllByProjectId(projectId)
+    List findAllForProject(String projectId) {
+        List projectReports = Report.findAllByProjectIdAndStatusNotEqual(projectId, DELETED)
+        populateActivityInformation(projectReports)
+        projectReports
     }
 
     def findAllForUser(String userId) {
@@ -44,7 +53,7 @@ class ReportingService {
         List permissions = UserPermission.findAllByUserIdAndEntityTypeAndAccessLevelNotEqual(userId, Project.class.name, AccessLevel.starred)
 
         def projectReports = Report.findAllByProjectIdInListAndStatusNotEqual(permissions.collect{it.entityId}, DELETED)
-        populateActivityCounts(projectReports)
+        populateActivityInformation(projectReports)
 
         permissions = UserPermission.findAllByUserIdAndEntityType(userId, Organisation.class)
 
@@ -68,7 +77,7 @@ class ReportingService {
             order("toDate", "asc")
         }
 
-        populateActivityCounts(results)
+        populateActivityInformation(results)
     }
 
     /**
@@ -76,9 +85,17 @@ class ReportingService {
      * @param reports the reports of interest
      * @return returns the reports parameter (not a copy)
      */
-    private List<Report> populateActivityCounts(List<Report> reports) {
+    private List<Report> populateActivityInformation(List<Report> reports) {
         for (Report report : reports) {
-            report.activityCount = getActivityCountForReport(report)
+
+            if (report.isSingleActivityReport() && report.activityId) {
+                Activity activity = Activity.findByActivityId(report.activityId)
+                report.progress = activity.progress
+            }
+            else if (report.isActivityReport()) {
+                report.activityCount = getActivityCountForReport(report)
+            }
+
         }
         reports
     }
@@ -88,15 +105,59 @@ class ReportingService {
         properties.reportId = Identifiers.getNew(true, '')
         Report report = new Report(reportId:properties.reportId)
         commonService.updateProperties(report, properties)
-        report.save(flush:true)
+
+        if (!report.hasErrors() && report.activityType) {
+            syncReportActivity(report)
+        }
+        if (!report.hasErrors()) {
+            report.save(flush:true)
+        }
         return report
     }
 
     Report update(String id, Map properties) {
         Report report = get(id)
-        commonService.updateProperties(report, properties)
-        report.save(flush:true)
+        if (!report) {
+            return null
+        }
+
+        if (report.isSubmittedOrApproved()) {
+            report.errors.reject(INVALID_STATUS_FOR_UPDATE_ERROR_KEY)
+        }
+        else {
+            commonService.updateProperties(report, properties)
+            report.save(flush:true)
+
+            if (!report.hasErrors() && report.isSingleActivityReport()) {
+                syncReportActivity(report)
+            }
+        }
+
         return report
+    }
+
+    /**
+     * Creates an activity to be associated with this report.
+     * @param report the Report to create an activity for, assumed to be valid.
+     */
+    private void syncReportActivity(Report report) {
+
+        Map activity = [plannedStartDate:report.fromDate, plannedEndDate:report.toDate, startDate: report.fromDate, endDate:report.toDate, type:report.activityType, description:report.name, projectId:report.projectId, managementUnitId:report.managementUnitId]
+        Map syncResult
+        if (report.activityId) {
+            activity.activityId = report.activityId
+            syncResult = activityService.update(activity, report.activityId)
+        }
+        else {
+            syncResult = activityService.create(activity)
+        }
+
+        if (syncResult.error) {
+            report.errors.reject('report.activity.creationFailed', [syncResult.error])
+        }
+        else {
+            report.activityId = syncResult.activityId
+        }
     }
 
     def delete(String id, boolean destroy) {
@@ -109,6 +170,10 @@ class ReportingService {
                     report.status = DELETED
                     report.save(flush: true, failOnError: true)
                 }
+                if (report.activityId) {
+                    activityService.delete(report.activityId, destroy)
+                }
+
                 return [status: 'ok']
 
             } catch (Exception e) {
@@ -121,6 +186,31 @@ class ReportingService {
         } else {
             return [status: 'error', errors: ['No such id']]
         }
+    }
+
+    /**
+     * If the report is completed via a single activity, this method deletes any activity output data and
+     * resets the progress to planned.  Otherwise, no changes are made.
+     * @param id the report id to reset.
+     * @return the report, after the update.
+     */
+    Report reset(String id) {
+        Report report = get(id)
+        if (!report) {
+            return null
+        }
+        if (report.isSubmittedOrApproved()) {
+            report.errors.reject(INVALID_STATUS_FOR_UPDATE_ERROR_KEY)
+        }
+        else {
+            if (report.isSingleActivityReport()) {
+                activityService.update([progress:Activity.PLANNED, activityId:report.activityId], report.activityId)
+                activityService.deleteActivityOutputs(report.activityId)
+            }
+            populateActivityInformation([report])
+
+        }
+        return report
     }
 
     def submit(String id, String comment = '') {
@@ -139,12 +229,74 @@ class ReportingService {
         return r
     }
 
-    def returnForRework(String id, String comment = '', String category = '') {
+    def returnForRework(String id, String comment = '', List categories = null) {
         def user = userService.getCurrentUserDetails()
         Report r = get(id)
-        r.returnForRework(user.userId, comment, category)
+        r.returnForRework(user.userId, comment, categories)
         r.save()
         return r
+    }
+
+    def cancel(String id, String comment = '', List categories = null) {
+        def user = userService.getCurrentUserDetails()
+        Report r = get(id)
+        r.cancel(user.userId, comment, categories)
+        r.save()
+        return r
+    }
+
+    /**
+     * A report adjustment can be performed to modify the results of an approved report via the creation of
+     * another report that contributes to the same scores as the original report.  This is sometimes required in
+     * MERIT if changes need to be made after a report has been approved and the original report is for some
+     * reason unable to have the approval withdrawn and the data updated via the standard workflow.
+     * This routine adds a status change to the report to indicate the adjustment and also creates a new
+     * report of the supplied type to record the required adjustments.
+     *
+     * @param id the reportId of the report that needs to be adjusted.
+     * @param comment the reason for the adjustment
+     * @param adjustmentActivityType the type of activity to be associated with the adjustment report that is to be created.
+     * @return the new adjustment report, or the original report if it is unable to be adjusted
+     */
+    Report adjust(String id, String comment = '', String adjustmentActivityType) {
+        def user = userService.getCurrentUserDetails()
+        Report toAdjust = get(id)
+        if (!toAdjust) {
+            return null
+        }
+
+        if (toAdjust.type == Report.TYPE_ADJUSTMENT || toAdjust.isAdjusted() || !toAdjust.isApproved()) {
+            toAdjust.errors.reject('report.adjustment.invalid', toAdjust.name)
+            return toAdjust
+        }
+
+        Report adjustmentReport = null
+        if (toAdjust.type != Report.TYPE_ADJUSTMENT && toAdjust.dateAdjusted == null) {
+
+            Map adjustmentReportProps = [
+                    name            : "Adjustment: " + toAdjust.name,
+                    description     : "Adjustment: " + toAdjust.description,
+                    fromDate        : toAdjust.fromDate,
+                    toDate          : toAdjust.toDate,
+                    type            : Report.TYPE_ADJUSTMENT,
+                    adjustedReportId: toAdjust.reportId,
+                    category        : "Adjustments",
+                    activityType    : adjustmentActivityType,
+                    projectId       : toAdjust.projectId,
+                    programId       : toAdjust.programId,
+                    organisationId  : toAdjust.organisationId,
+                    submissionDate  : toAdjust.submissionDate
+            ]
+            adjustmentReport = create(adjustmentReportProps)
+
+            if (!adjustmentReport.hasErrors()) {
+
+                toAdjust.adjust(user.userId, comment)
+                toAdjust.save()
+            }
+        }
+
+        return adjustmentReport
     }
 
     /**

@@ -1,0 +1,466 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "initialOrFollowup",
+                    "constraints": [
+                        "Initial",
+                        "Follow-up"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "existingErosionSites"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(existingErosionSites)"
+                    },
+                    "units": "ha",
+                    "dataType": "number",
+                    "name": "existingErosionAreaHa",
+                    "validate": "min[0]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesManaged"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.areaHa(sitesManaged)"
+                    },
+                    "dataType": "number",
+                    "units": "ha",
+                    "name": "calculatedAreaOfErosionControlHa"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.lengthKm(sitesManaged)"
+                    },
+                    "dataType": "number",
+                    "units": "km",
+                    "name": "calculatedLengthOfErosionControlKm"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaOfErosionControlHa, calculatedAreaOfErosionControlHa, 0.1) and within(lengthOfErosionControlKm, calculatedLengthOfErosionControlKm, 0.1)) or roundTo(areaOfErosionControlHa, 2) != roundTo(areaOfErosionControlInvoicedHa, 2) or roundTo(lengthOfErosionControlKm, 2) != roundTo(lengthOfErosionControlInvoicedKm, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "units": "ha",
+                    "name": "areaOfErosionControlHa",
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesManaged)"
+                    },
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "number",
+                    "units": "km",
+                    "name": "lengthOfErosionControlKm",
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.lengthKm(sitesManaged)"
+                    },
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "number",
+                    "units": "ha",
+                    "name": "areaOfErosionControlInvoicedHa",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaOfErosionControlHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "number",
+                    "units": "km",
+                    "name": "lengthOfErosionControlInvoicedKm",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "lengthOfErosionControlKm"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(areaOfErosionControlHa, calculatedAreaOfErosionControlHa, 0.1) and within(lengthOfErosionControlKm, calculatedLengthOfErosionControlKm, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaOfErosionControlHa, 2) != roundTo(areaOfErosionControlInvoicedHa, 2) or roundTo(lengthOfErosionControlKm, 2) != roundTo(lengthOfErosionControlInvoicedKm, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "number",
+                    "name": "numberInstalled",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "text",
+                    "name": "erosionManagementMethod",
+                    "constraints": [
+                        "Alternative watering point",
+                        "Erosion control structures",
+                        "Farming practice change",
+                        "Fencing",
+                        "Revegetation",
+                        "Terracing",
+                        "Vegetated waterway (bioswale)",
+                        "Windbreaks",
+                        "Other"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "otherErosionManagementMethod",
+                    "behaviour": [{
+                        "condition": "erosionManagementMethod == \"Other\"",
+                        "type": "visible"
+                    }],
+                    "validate": "required,max[300]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesBenefittingFromErosionControl"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesBenefittingFromErosionControl)"
+                    },
+                    "dataType": "number",
+                    "name": "areaBenefitingHa",
+                    "units": "ha"
+                },
+                {
+                    "dataType": "text",
+                    "name": "evidenceOfBenefit",
+                    "validate": "maxSize[300]"
+                }
+            ],
+            "dataType": "list",
+            "name": "erosionManagementDetails",
+            "minSize": 0
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Erosion Management",
+    "title": "Erosion management",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "columns": [
+                    {
+                        "width": "10%",
+                        "source": "initialOrFollowup",
+                        "title": "Initial or follow-up activity?",
+                        "type": "selectOne"
+                    },
+                    {
+                        "width": "5%",
+                        "title": "Site/s where erosion is evident",
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "feature",
+                                "source": "existingErosionSites"
+                            },
+                            {
+                                "source": "existingErosionAreaHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+
+                            }
+                        ]
+                    },
+
+                    {
+                        "width": "6%",
+                        "type": "col",
+                        "title": "Site/s of erosion control",
+                        "items": [
+                            {
+                                "source": "sitesManaged",
+                                "type": "feature"
+                            },
+                            {
+                                "source": "calculatedAreaOfErosionControlHa",
+                                "type": "number",
+                                "readonly": "readonly",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "calculatedLengthOfErosionControlKm",
+                                "type": "number",
+                                "readonly": "readonly",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Please attach mapping details",
+                                        "source": "extraMappingDetails",
+                                        "type": "document"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "17%",
+                        "type": "col",
+                        "title": "Actual area (ha) / length (km) of erosion control",
+                        "helpText": "Manually enter correct figure for this reporting period if different to mapped value.",
+                        "items": [
+                            {
+                                "source": "areaOfErosionControlHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "lengthOfErosionControlKm",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for actual being different to mapped amount",
+                                        "source": "mappingNotAlignedReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "mappingNotAlignedComments",
+                                        "type": "textarea",
+                                        "rows": 5
+                                    }
+
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "17%",
+                        "type": "col",
+                        "title": "Invoiced area (ha) / length (km) of erosion control",
+                        "helpText": "Enter the amount you will invoice for during this reporting period.",
+                        "items": [
+                            {
+                                "source": "areaOfErosionControlInvoicedHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "source": "lengthOfErosionControlInvoicedKm",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for invoiced amount being different to actual amount",
+                                        "source": "invoicedNotActualReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "invoicedNotActualComments",
+                                        "type": "textarea",
+                                        "rows": 5
+
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "width": "5%",
+                        "source": "numberInstalled",
+                        "title": "Number of erosion control structures installed",
+                        "type": "number"
+                    },
+                    {
+                        "width": "20%",
+                        "type": "col",
+                        "title": "Type of treatment method",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "erosionManagementMethod",
+                                        "type": "select2"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "otherErosionManagementMethod",
+                                        "type": "textarea",
+                                        "placeholder": "Type of treatment method"
+                                    }
+                                ]
+                            }
+
+                        ]
+                    },
+                    {
+                        "width": "20%",
+                        "title": "Please map any off-site area/s if they benefitted from this erosion management activity",
+                        "type": "col",
+                        "items": [
+                            {
+                                "source": "sitesBenefittingFromErosionControl",
+                                "type": "feature"
+                            },
+                            {
+                                "source": "areaBenefitingHa",
+                                "type": "number",
+                                "displayOptions": {
+                                    "displayUnits": true
+                                }
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "evidenceOfBenefit",
+                                        "placeholder": "Please describe evidence of off-site benefits",
+                                        "type": "textarea"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+
+
+                ],
+                "userAddedRows": true,
+                "source": "erosionManagementDetails",
+                "type": "table"
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

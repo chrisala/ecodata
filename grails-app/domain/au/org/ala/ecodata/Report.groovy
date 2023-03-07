@@ -14,31 +14,51 @@ class Report {
     public static final String REPORT_APPROVED = 'published'
     public static final String REPORT_SUBMITTED = 'pendingApproval'
     public static final String REPORT_NOT_APPROVED = 'unpublished'
+    public static final String REPORT_CANCELLED = 'cancelled'
 
+    /**
+     *  An activity report is the one that is applied to all activities performed during the
+     *  reporting period.
+     */
     public static final String TYPE_ACTIVITY = 'Activity'
 
-    public static class StatusChange {
-        Date dateChanged
-        String changedBy
-        String status
-        String comment
-        String category
-        static constraints = {
-            version false
-        }
-
-
-    }
+    /**
+     * An adjustment report is created to amend the values entered into a submitted report without requiring the
+     * report to have approvals withdrawn and the report edited.
+     */
+    public static final String TYPE_ADJUSTMENT = 'Adjustment'
 
     ObjectId id
 
+    /** UUID for this report */
     String reportId
-    String projectId
-    String organisationId
 
+    /** If this report is for a project, this identifies which project */
+    String projectId
+    /** If this report is for a organisation, this identifies which organisation */
+    String organisationId
+    /** If this report is for a program, this identifies which program */
+    String programId
+    /** If this report is for a management unit, this identifies which program */
+    String managementUnitId
     String name
     String description
-    String type // "Activity" for stage reporting, "Performance" for organisation performance self assessments
+    String type // "Activity" for stage/activity progress reporting, "Performance", "Administrative" for organisation performance self assessments
+    String category // Client classification for reports
+    /** Name of the report configuration that generated this report */
+    String generatedBy
+
+    /**
+     * For reports with an activityType specified, this field holds the id of the activity that contains the data for this report.
+     * It is unused for other report types.
+     */
+    String activityId
+    /**
+     * For type == REPORT_TYPE_SINGLE this field holds the type of activity that needs to be
+     * completed as a requirement for this report.
+     * It is unused for other report types.
+     */
+    String activityType
 
     Date fromDate
     Date toDate
@@ -67,13 +87,24 @@ class Report {
     Date dateReturned
     /** The user ID of the grant manager who returned this Report */
     String returnedBy
+    /** The Date the report adjustment was initiated */
+    Date dateAdjusted
+    /** The user ID of the grant manager who initiated the adjustment for this Report */
+    String adjustedBy
     /** Number of days before (-ve) or after the due date the report was submitted.  Calculated at submit time to make reporting easier. */
     Integer submissionDeltaInWeekdays
     /** Number of days after a report is submitted that it's approved.  Calculated at approval time to make reporting easier. */
     Integer approvalDeltaInWeekdays
+    /** The Date the report was cancelled */
+    Date dateCancelled
+    /** The user ID of the grant manager who cancelled this Report */
+    String cancelledBy
 
     /** REPORT_NOT_APPROVED, REPORT_SUBMITTED, REPORT_APPROVED */
     String publicationStatus = REPORT_NOT_APPROVED
+
+    /** Only non-null for reports of type 'Adjustment' - references the id of the Report that the adjustment applies to */
+    String adjustedReportId
 
     /** active, deleted */
     String status = 'active'
@@ -104,8 +135,16 @@ class Report {
     }
 
     public boolean isSubmittedOrApproved() {
-        return  publicationStatus == REPORT_SUBMITTED ||
+        return publicationStatus == REPORT_SUBMITTED ||
                 publicationStatus == REPORT_APPROVED
+    }
+
+    public boolean isApproved() {
+        return publicationStatus == REPORT_APPROVED
+    }
+
+    public boolean isAdjusted() {
+        return dateAdjusted != null
     }
 
     public boolean isActivityReport() {
@@ -121,7 +160,9 @@ class Report {
             approvalDeltaInWeekdays = weekDaysBetween(dateSubmitted, changeDate)
         }
         StatusChange change = changeStatus(userId, 'approved', changeDate, comment)
-
+        markDirty("approvedBy")
+        markDirty("dateApproved")
+        markDirty("publicationStatus")
         publicationStatus = REPORT_APPROVED
         approvedBy = change.changedBy
         dateApproved = change.dateChanged
@@ -136,24 +177,60 @@ class Report {
         if (dueDate && !submissionDeltaInWeekdays) {
             submissionDeltaInWeekdays = weekDaysBetween(dueDate, changeDate)
         }
+        markDirty("submittedBy")
+        markDirty("dateSubmitted")
+        markDirty("publicationStatus")
         publicationStatus = REPORT_SUBMITTED
         submittedBy = change.changedBy
         dateSubmitted = change.dateChanged
     }
 
-    public void returnForRework(String userId, String comment = '', String category = '', Date changeDate = new Date()) {
-        StatusChange change = changeStatus(userId, 'returned', changeDate, comment, category)
-
+    public void returnForRework(String userId, String comment = '', List categories = null, Date changeDate = new Date()) {
+        StatusChange change = changeStatus(userId, 'returned', changeDate, comment, categories)
+        markDirty("returnedBy")
+        markDirty("dateReturned")
+        markDirty("publicationStatus")
         publicationStatus = REPORT_NOT_APPROVED
         returnedBy = change.changedBy
         dateReturned = change.dateChanged
     }
 
-    private StatusChange changeStatus(String userId, String status, Date changeDate = new Date(), String comment = '', String category = '') {
-        StatusChange change = new StatusChange(changedBy:userId, dateChanged: changeDate, status: status, comment: comment, category:category)
+    public void cancel(String userId, String comment = '', List categories = null, Date changeDate = new Date()) {
+        StatusChange change = changeStatus(userId, 'cancelled', changeDate, comment, categories)
+        markDirty("cancelledBy")
+        markDirty("dateCancelled")
+        markDirty("publicationStatus")
+        publicationStatus = REPORT_CANCELLED
+        cancelledBy = change.changedBy
+        dateCancelled = change.dateChanged
+    }
+
+    public void adjust(String userId, String comment, Date changeDate = new Date()) {
+
+        if (!isApproved() || isAdjusted()) {
+            throw new IllegalArgumentException("Only approved reports can be adjusted")
+        }
+        StatusChange change = changeStatus(userId, 'adjusted', changeDate, comment)
+
+        markDirty("adjustedBy")
+        markDirty("dateAdjusted")
+        markDirty("publicationStatus")
+
+        publicationStatus = REPORT_APPROVED
+        adjustedBy = change.changedBy
+        dateAdjusted = change.dateChanged
+    }
+
+    private StatusChange changeStatus(String userId, String status, Date changeDate = new Date(), String comment = '', List categories = null) {
+        StatusChange change = new StatusChange(changedBy:userId, dateChanged: changeDate, status: status, comment: comment, categories:categories)
         statusChangeHistory << change
+        markDirty('statusChangeHistory')
 
         return change
+    }
+
+    public boolean isSingleActivityReport() {
+        return activityType != null
     }
 
     static transients = ['due', 'overdue', 'current']
@@ -168,19 +245,49 @@ class Report {
         approvedBy nullable:true
         dateReturned nullable:true
         returnedBy nullable:true
+        dateCancelled nullable:true
+        cancelledBy nullable:true
+        adjustedBy nullable:true
+        dateAdjusted nullable:true
         projectId nullable:true
         dueDate nullable:true
         organisationId nullable:true
+        programId nullable:true
+        managementUnitId nullable: true
         approvalDeltaInWeekdays nullable: true
         submissionDeltaInWeekdays nullable: true
         activityCount nullable: true
         data nullable: true
         progress nullable: true
         submissionDate nullable: true
+        activityId nullable: true
+        activityType nullable:true
+        type nullable:false
+        category nullable:true
+        generatedBy nullable:true
+        statusChangeHistory nullable: true
+        adjustedReportId nullable:true, validator: { value, report ->
+            // Adjustment reports must reference another report
+            if (report.type == TYPE_ADJUSTMENT) {
+                if (value == null) {
+                    return 'nullable'
+                }
+            }
+            else {
+                if (value != null) {
+                    return 'nullable'
+                }
+            }
+        }
     }
 
     static embedded = ['statusChangeHistory']
     static mapping = {
+        reportId index: true
+        projectId index: true
+        adjustedReportId index: true
+        programId index: true
+
         version false
     }
 

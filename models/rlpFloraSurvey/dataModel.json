@@ -1,0 +1,389 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "baselineOrIndicatorSurvey",
+                    "description": "",
+                    "constraints": [
+                        "Baseline",
+                        "Indicator"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "number",
+                    "name": "numberOfFloraSurveys",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "text",
+                    "name": "dateRange",
+                    "description": "What time of year (eg. Dates by dd/mm/yyyyy, Months, Season/s)",
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesSurveyed"
+                },
+                {
+                    "dataType": "number",
+                    "name": "siteCalculatedAreaHa",
+                    "computed": {
+                        "expression": "$geom.areaHa(sitesSurveyed)"
+                    },
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesSurveyed)"
+                    },
+                    "dataType": "number",
+                    "name": "areaSurveyedHa",
+                    "validate": "required,min[0]",
+                    "units": "ha"
+                },
+                {
+                    "dataType": "number",
+                    "name": "areaInvoicedHa",
+                    "units": "ha",
+                    "validate": [
+                        {
+                            "rule": "required"
+                        },
+                        {
+                            "rule": "min[0]"
+                        },
+                        {
+                            "rule": "max",
+                            "param": {
+                                "type": "computed",
+                                "expression": "areaSurveyedHa"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not within(areaSurveyedHa, siteCalculatedAreaHa, 0.1)",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualReason",
+                    "constraints": [
+                        "Work was undertaken over a greater area than will be invoiced for",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "roundTo(areaSurveyedHa, 2) != roundTo(areaInvoicedHa, 2)",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "invoicedNotActualComments",
+                    "behaviour": [
+                        {
+                            "type": "if",
+                            "condition": "\"Other\" == invoicedNotActualReason"
+                        }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not within(areaSurveyedHa, siteCalculatedAreaHa, 0.1) or roundTo(areaSurveyedHa, 2) != roundTo(areaInvoicedHa, 2)",
+                            "type": "if"
+                        }
+                    ]
+                },
+                {
+                    "columns": [
+                        {
+                            "dataType": "species",
+                            "name": "species",
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "threatenedEcologicalCommunity",
+                            "validate": "maxSize[300]"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "surveyTechnique",
+                            "description": "What/how will the survey capture the flora data",
+                            "validate": "required,maxSize[300]"
+                        },
+                        {
+                            "dataType": "text",
+                            "name": "individualsOrGroups",
+                            "constraints": [
+                                "Individuals",
+                                "Groups"
+                            ],
+                            "validate": "required"
+                        },
+                        {
+                            "dataType": "number",
+                            "name": "numberOfIndividualsOrGroups",
+                            "validate": "required,min[0]"
+                        }
+                    ],
+                    "dataType": "list",
+                    "name": "floraSurveyDetails"
+                }
+            ],
+            "dataType": "list",
+            "name": "floraSurveys",
+            "minSize": 1
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Flora survey",
+    "title": "Flora survey",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "addRowText": "New survey site",
+                "userAddedRows": true,
+                "source": "floraSurveys",
+                "type": "repeat",
+                "items": [
+                    {
+                        "type": "row",
+                        "css": "border-bottom",
+                        "items": [
+                            {
+                                "preLabel": "Baseline survey or indicator (follow-up) survey?",
+                                "css": "span3",
+                                "source": "baselineOrIndicatorSurvey",
+                                "type": "selectOne"
+                            },
+                            {
+                                "preLabel": "Number of flora surveys conducted",
+                                "css": "span3",
+                                "source": "numberOfFloraSurveys",
+                                "type": "number"
+                            },
+                            {
+                                "preLabel": "Date range",
+                                "css": "span3",
+                                "source": "dateRange",
+                                "type": "text"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "row",
+                        "items": [
+                            {
+                                "type": "col",
+                                "css": "span3 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Site/s covered by flora surveys",
+                                                "source": "sitesSurveyed",
+                                                "type": "feature"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "source": "siteCalculatedAreaHa",
+                                        "type": "number",
+                                        "readonly": true,
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Please attach mapping details",
+                                                "source": "extraMappingDetails",
+                                                "type": "document"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4 col-border-right",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Actual area (ha) covered by flora surveys",
+                                                "helpText": "Manually enter correct figure for this reporting period if different to mapped value.",
+                                                "source": "areaSurveyedHa",
+                                                "type": "number",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for actual being different to mapped amount",
+                                                "source": "mappingNotAlignedReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "mappingNotAlignedComments",
+                                                "type": "textarea",
+                                                "rows": 5
+                                            }
+
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "col",
+                                "css": "span4",
+                                "items": [
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Invoiced area (ha) covered by flora surveys",
+                                                "helpText": "Enter the amount you will invoice for during this reporting period.",
+                                                "source": "areaInvoicedHa",
+                                                "type": "number",
+                                                "validate": "required",
+                                                "displayOptions": {
+                                                    "displayUnits": true
+                                                }
+                                            }
+                                        ]
+
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "preLabel": "Reason for invoiced amount being different to actual amount",
+                                                "source": "invoicedNotActualReason",
+                                                "type": "selectOne"
+
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "row",
+                                        "items": [
+                                            {
+                                                "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                                "source": "invoicedNotActualComments",
+                                                "type": "textarea",
+                                                "rows": 5
+
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+
+
+                        ]
+                    },
+                    {
+                        "columns": [
+                            {
+                                "width": "30%",
+                                "source": "species",
+                                "title": "Target species recorded",
+                                "type": "speciesSelect"
+                            },
+                            {
+                                "width": "25%",
+                                "source": "threatenedEcologicalCommunity",
+                                "title": "Threatened ecological communities (if applicable)",
+                                "type": "text"
+                            },
+                            {
+                                "width": "20%",
+                                "source": "surveyTechnique",
+                                "title": "Survey technique",
+                                "type": "text"
+                            },
+                            {
+                                "width": "15%",
+                                "source": "individualsOrGroups",
+                                "title": "Individuals or groups?",
+                                "type": "selectOne"
+                            },
+                            {
+                                "width": "10%",
+                                "source": "numberOfIndividualsOrGroups",
+                                "title": "Number of groups / individuals in flora survey",
+                                "type": "number"
+                            }
+                        ],
+                        "userAddedRows": true,
+                        "source": "floraSurveyDetails",
+                        "type": "table"
+                    }
+                ]
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

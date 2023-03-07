@@ -38,12 +38,33 @@ class Hub {
     Map content
     /** quick links to Biocollect pages that appeared on certain pages like create record, view record etc. */
     List quickLinks
+    /** provide breadcrumb overrides for a controller action */
+    List customBreadCrumbs = []
+    /** configure facets for different data pages like all records, my records etc. */
+    Map pages
+    /** on record listing pages like all records, my records etc., configure table columns using this property */
+    List dataColumns
+    MapLayersConfiguration mapLayersConfig
+    /** configure how activity is displayed on map for example point, heatmap or cluster. */
+    List mapDisplays
+    /** time series animation can be done on an index other than dateCreated. */
+    String timeSeriesOnIndex
 
     String status = 'active'
 
     Date dateCreated
     Date lastUpdated
 
+    /** If an email is generated relating to this hub, use this sender address instead of the default it the config */
+    String emailFromAddress
+
+    /** If an email is generated relating to this hub, use this sender address instead of the default it the config */
+    String emailReplyToAddress
+
+    /** The URL prefix to use when creating a URL a user can use to download a report */
+    String downloadUrlPrefix
+
+    AccessManagementOptions accessManagementOptions
 
     static mapping = {
         hubId index: true
@@ -52,11 +73,23 @@ class Hub {
 
     static constraints = {
         urlPath unique: true
-        skin inList: ['ala2', 'nrm','mdba','ala', 'configurableHubTemplate1']
+        skin inList: ['ala2', 'nrm','mdba','ala', 'configurableHubTemplate1', 'bs4']
         title nullable:true
         homePagePath nullable:true
         defaultProgram nullable: true
         templateConfiguration nullable: true
         content nullable: true
+        customBreadCrumbs nullable: true
+        pages nullable: true
+        dataColumns nullable: true
+        mapLayersConfig nullable: true
+        mapDisplays nullable: true
+        timeSeriesOnIndex nullable: true
+        emailFromAddress nullable: true
+        emailReplyToAddress nullable: true
+        downloadUrlPrefix nullable: true
+        accessManagementOptions nullable: true
     }
+
+    static embedded = ['mapLayersConfig', 'accessManagementOptions']
 }

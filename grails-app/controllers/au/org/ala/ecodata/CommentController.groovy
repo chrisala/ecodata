@@ -14,8 +14,8 @@ class CommentController {
     // content-type. The JSON conversion is handled in the filter. This allows
     // for universal JSONP support.
     def asJson = { model ->
-        response.setContentType("application/json;charset=UTF-8")
-        model
+        //response.setContentType("application/json;charset=UTF-8")
+        render model as JSON
     }
 
     def list() {
@@ -70,11 +70,11 @@ class CommentController {
             if(!comment.hasErrors()){
                 Map model = commentService.getCommentProperties(comment)
 
-                response.addHeader("content-location", grailsApplication.config.grails.serverURL + "/comment/" + comment.getId().toString())
-                response.addHeader("location", grailsApplication.config.grails.serverURL + "/comment/" + comment.getId().toString())
+                response.addHeader("content-location", grailsApplication.config.getProperty('grails.serverURL') + "/comment/" + comment.getId().toString())
+                response.addHeader("location", grailsApplication.config.getProperty('grails.serverURL') + "/comment/" + comment.getId().toString())
                 response.addHeader("entityId", comment.getId().toString())
                 response.setContentType("application/json")
-                render model as JSON
+                render new JSON(model)
             } else {
                 response.sendError(SC_INTERNAL_SERVER_ERROR, 'Failed saving data to database');
             }
@@ -92,7 +92,7 @@ class CommentController {
             response.sendError(SC_BAD_REQUEST, 'Missing text');
         } else {
             Map result
-            json.isALAAdmin = (json.isALAAdmin?:false) as Boolean;
+            json.isALAAdmin = (json?.isALAAdmin != null ? json?.isALAAdmin?.toString()?.toBoolean() : false)
             Comment comment = commentService.update(json);
             if(comment){
                 if ((comment.userId == json.userId) || json.isALAAdmin) {
@@ -105,7 +105,7 @@ class CommentController {
                         result.success = true;
                     }
 
-                    render(text: result as JSON, contentType: 'application/json');
+                    render(text: new JSON(result), contentType: 'application/json');
                 } else {
                     response.sendError(SC_UNAUTHORIZED, 'Only comment owner can update this comment.');
                 }
@@ -120,7 +120,7 @@ class CommentController {
         if (!params.id) {
             response.sendError(SC_BAD_REQUEST, "Missing id");
         } else {
-            params.isALAAdmin = (params.isALAAdmin?:false) as Boolean;
+            params.isALAAdmin = params.boolean('isALAAdmin');
 
             boolean destroy = params.destroy == null ? false : params.destroy.toBoolean()
 
@@ -146,7 +146,7 @@ class CommentController {
             Comment c = Comment.get(params.id);
             if (c) {
                 Map mapOfProperties = commentService.getCommentProperties(c)
-                render text: mapOfProperties as JSON, contentType: 'application/json'
+                render text: new JSON(mapOfProperties), contentType: 'application/json'
             } else {
                 response.sendError(SC_NOT_FOUND, "Comment not found");
             }

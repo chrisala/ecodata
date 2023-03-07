@@ -1,6 +1,11 @@
 package au.org.ala.ecodata
 
+import au.org.ala.ecodata.graphql.mappers.ActivityGraphQLMapper
+import grails.util.Holders
+import graphql.schema.DataFetcher
+import graphql.schema.DataFetchingEnvironment
 import org.bson.types.ObjectId
+import org.grails.gorm.graphql.entity.dsl.GraphQLMapping
 
 /**
  * Currently this holds both activities and assessments.
@@ -25,6 +30,8 @@ class Activity {
         activities may have 0..n Outputs - these are mapped from the Output side
     */
 
+    static graphql = ActivityGraphQLMapper.graphqlMapping()
+
     static mapping = {
         activityId index: true
         siteId index: true
@@ -41,10 +48,19 @@ class Activity {
     String siteId
     String projectId
     String projectActivityId
+    String managementUnitId
     String description
-    String type
     Date startDate
     Date endDate
+
+    /** The type of activity performed.  This field must match the name of an ActivityForm */
+    String type
+    /**
+     * The formVersion of the ActivityForm used to record the details of this activity. If not-null, the details of this activity should be
+     * displayed using the formVersion here.
+     */
+    Integer formVersion
+
     /**
      * Allows grouping of project activities into stages or milestones for planning and reporting purposes.
      * Biodiversity & CFOC projects plan activities in six monthly groups (Stage 1, Stage 2...)
@@ -64,11 +80,21 @@ class Activity {
     Date dateCreated
     Date lastUpdated
     String userId
+    Boolean embargoed
+    /**
+     * data quality control
+     */
+    String verificationStatus
 
     /** An activity is considered complete if it's progress attribute is finished, deferred or cancelled. */
     public boolean isComplete() {
         def completedStates = [FINISHED, DEFERRED, CANCELLED]
         return progress in completedStates
+    }
+
+    /** Activities with a progress of DEFFERED or CANCELLED should not have any outputs associated with them */
+    public boolean supportsOutputs() {
+        return progress in [PLANNED, STARTED, FINISHED]
     }
 
     static transients = ['complete']
@@ -77,6 +103,7 @@ class Activity {
         siteId nullable: true
         projectId nullable: true
         projectActivityId nullable: true
+        managementUnitId nullable: true
         description nullable: true
         startDate nullable: true
         endDate nullable: true
@@ -94,6 +121,9 @@ class Activity {
         projectStage nullable: true
         projectActivityId nullable: true
         userId nullable:true
+        embargoed nullable:true
+        formVersion nullable: true
+        verificationStatus nullable: true, inList: ['not applicable', 'not approved', 'not verified', 'under review' , 'approved']
     }
 
 }

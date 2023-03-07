@@ -20,7 +20,7 @@ class ActivityController {
     // for universal JSONP support.
     def asJson = { model ->
         response.setContentType("application/json;charset=UTF-8")
-        model
+        render model as JSON
     }
 
     def index() {
@@ -32,12 +32,13 @@ class ActivityController {
         def detail = params.view == SCORES ? [SCORES] : []
         if (!id) {
 
-            def list = activityService.getAll(params.includeDeleted as boolean, params.view)
+            def list = activityService.getAll(params.boolean('includeDeleted'), params.view)
             list.sort {it.name}
             //log.debug list
             asJson([list: list])
         } else {
-            def act = activityService.get(id, detail, params?.version)
+            boolean hideMemberOnlyFlds = params?.hideMemberOnlyFlds == null ? false : params.hideMemberOnlyFlds.toBoolean()
+            def act = activityService.get(id, detail, params?.version, params?.userId, hideMemberOnlyFlds)
             if (act) {
                 asJson act
             } else {
@@ -54,6 +55,20 @@ class ActivityController {
         } else {
             response.status = 404
             render status:404, text: 'No such id'
+        }
+    }
+
+    @RequireApiKey
+    def bulkDelete() {
+        boolean destroy = params.destroy == null ? false : params.destroy.toBoolean()
+        Map payload = request.JSON
+        List ids = payload.ids
+        if (ids) {
+            Map resp = activityService.bulkDelete(ids, destroy)
+            render (status: 200, text: [message: 'deleted', details: resp])
+        } else {
+            response.status = 404
+            render status:404, text: [message: 'Please provide property "ids" in JSON payload']
         }
     }
 
@@ -85,7 +100,7 @@ class ActivityController {
         def result
         def message
         if (id) {
-            result = activityService.update(props,id)
+            result = activityService.update(props,id, Boolean.parseBoolean(params.lock))
             message = [message: 'updated']
         }
         else {
@@ -99,7 +114,7 @@ class ActivityController {
                 errors << [error: result.error]
             }
             errors.each {
-                log.error it
+                log.error it.toString()
             }
             message = [message: 'error', errors: errors]
         }
@@ -136,7 +151,7 @@ class ActivityController {
                 errors << [error: result.error]
             }
             errors.each {
-                log.error it
+                log.error it.toString()
             }
             message = [message: 'error', errors: errors]
         }
@@ -259,6 +274,22 @@ class ActivityController {
     }
 
     /**
+     * Count distinct sites associated with activities in a project
+     * @param id Project identifier
+     * @return [ sites: [ 'Site id' ] ]
+     */
+    def getDistinctSitesForProject(String id){
+        if(!id){
+            response.status = 404
+            render status:404, text: 'No such id'
+        }
+        else {
+            def total = activityService.getDistinctSitesForProject(id)
+            render text: [sites: total] as JSON, contentType: 'application/json'
+        }
+    }
+
+    /**
      * Request body should be JSON formatted of the form:
      * {
      *     "property1":value1,
@@ -325,5 +356,10 @@ class ActivityController {
         } else {
             render status: 403, text: error
         }
+    }
+
+    def getDefaultFacets(){
+        List facets = grailsApplication.config.getProperty('facets.data', List)
+        render text: facets as JSON, contentType: 'application/json'
     }
 }

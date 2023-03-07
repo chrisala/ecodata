@@ -1,0 +1,343 @@
+{
+    "dataModel": [
+        {
+            "columns": [
+                {
+                    "dataType": "text",
+                    "name": "installedOrMaintained",
+                    "description": "",
+                    "constraints": [
+                        "Installed",
+                        "Maintained"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "number",
+                    "name": "numberOfTreatmentsImplemented",
+                    "validate": "required,min[0]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "improvedSites"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.areaHa(improvedSites)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedAreaCoveringRegimeChangeHa",
+                    "units": "ha"
+                },
+                {
+                    "computed": {
+                        "expression": "$geom.lengthKm(improvedSites)"
+                    },
+                    "dataType": "number",
+                    "name": "calculatedLengthOfRegimeChangeKm",
+                    "units": "km"
+                },
+                {
+                    "dataType": "document",
+                    "name": "extraMappingDetails",
+                    "validate": "required",
+                    "description": "Please fill in the Mapped/Actual/Invoice fields before attaching a document here. If those fields match this field will be void. <br/>If any of these fields differ please attach your organisation's detailed map for the area, covered by this project service - during reporting period (include the scale measure for each map).",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(calculatedAreaCoveringRegimeChangeHa, areaCoveringRegimeChangeHa, 0.1) and within(calculatedLengthOfRegimeChangeKm, lengthOfRegimeChangeKm, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedReason",
+                    "constraints": [
+                        "Mapped area simplifies more complex area/s where work was undertaken during this period",
+                        "Other"
+                    ],
+                    "validate": "required",
+                    "behaviour": [
+                        {
+                            "condition": "not (within(calculatedAreaCoveringRegimeChangeHa, areaCoveringRegimeChangeHa, 0.1) and within(calculatedLengthOfRegimeChangeKm, lengthOfRegimeChangeKm, 0.1))",
+                            "type": "visible"
+                        }
+                    ]
+                },
+                {
+                    "dataType": "text",
+                    "name": "mappingNotAlignedComments",
+                    "validate": "required,maxSize[300]",
+                    "behaviour": [
+                        {
+                            "type": "visible",
+                            "condition": "\"Other\" == mappingNotAlignedReason"
+                        }]
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "calculatedAreaCoveringRegimeChangeHa"
+                    },
+                    "dataType": "number",
+                    "name": "areaCoveringRegimeChangeHa",
+                    "validate": "min[0]",
+                    "units": "ha"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "calculatedLengthOfRegimeChangeKm"
+                    },
+                    "dataType": "number",
+                    "name": "lengthOfRegimeChangeKm",
+                    "validate": "min[0]",
+                    "units": "km"
+                },
+                {
+                    "dataType": "text",
+                    "name": "treatmentType",
+                    "description": "",
+                    "constraints": [
+                        "Removing barriers (e.g fish barriers)",
+                        "Structure instalment or modification (e.g. weirs, flow gauging stations, fords, culverts)",
+                        "Resnagging",
+                        "Other"
+                    ],
+                    "validate": "required"
+                },
+                {
+                    "dataType": "text",
+                    "name": "otherTreatmentType",
+                    "behaviour": [{
+                        "condition": "treatmentType == \"Other\"",
+                        "type": "enable"
+                    }],
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "text",
+                    "name": "treatmentObjective",
+                    "description": "Aim of the action - e.g. hydrological regime change from X to Y",
+                    "validate": "required,maxSize[300]"
+                },
+                {
+                    "dataType": "feature",
+                    "name": "sitesOfCatchmentManaged"
+                },
+                {
+                    "defaultValue": {
+                        "type": "computed",
+                        "expression": "$geom.areaHa(sitesOfCatchmentManaged)"
+                    },
+                    "dataType": "number",
+                    "name": "areaOfCatchmentManagedHa",
+                    "description": "Area improved by hydrological regime change",
+                    "validate": "min[0]"
+                }
+            ],
+            "dataType": "list",
+            "name": "hydrologicalRegimeDetails"
+        },
+        {
+            "dataType": "image",
+            "name": "photographicEvidence"
+        }
+    ],
+    "modelName": "RLP - Improving hydrological regimes",
+    "title": "Improving hydrological regimes",
+    "viewModel": [{
+        "type": "section",
+        "items": [
+            {
+                "columns": [
+                    {
+                        "width": "15%",
+                        "source": "installedOrMaintained",
+                        "type": "selectOne",
+                        "title": "Installed or maintained?"
+                    },
+                    {
+                        "width": "6%",
+                        "source": "numberOfTreatmentsImplemented",
+                        "title": "Number of treatments implemented to improve water management",
+                        "type": "number"
+                    },
+                    {
+                        "width": "10%",
+
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "feature",
+                                "source": "improvedSites"
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "type": "number",
+                                        "source": "calculatedAreaCoveringRegimeChangeHa",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        },
+                                        "readonly": true
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "type": "number",
+                                        "source": "calculatedLengthOfRegimeChangeKm",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        },
+                                        "readonly": true
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Please attach mapping details",
+                                        "source": "extraMappingDetails",
+                                        "type": "document"
+                                    }
+                                ]
+                            }
+
+
+                        ],
+
+                        "title": "Site/s where hydrological regimes are being improved"
+                    },
+                    {
+                        "width": "10%",
+                        "title": "Actual area (ha) / length (km) covering the hydrological regime change",
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "areaCoveringRegimeChangeHa",
+                                        "type": "number",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    }]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "lengthOfRegimeChangeKm",
+                                        "type": "number",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "preLabel": "Reason for actual being different to mapped amount",
+                                        "source": "mappingNotAlignedReason",
+                                        "type": "selectOne"
+
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "placeholder": "Please enter the reason/s the mapping didn't align with the invoiced amount",
+                                        "source": "mappingNotAlignedComments",
+                                        "type": "textarea",
+                                        "rows": 5
+                                    }
+
+                                ]
+                            }
+                        ]
+                    },
+
+                    {
+                        "width": "25%",
+
+                        "title": "Type of treatment implemented to improve water management",
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [{
+                                    "source": "treatmentType",
+                                    "type": "select2"
+                                }]
+                            },
+                            {
+                                "source": "otherTreatmentType",
+                                "placeholder": "Type of treatment implemented (if Other)",
+                                "type": "text"
+                            }
+                        ]
+
+                    },
+
+                    {
+                        "width": "25%",
+                        "source": "treatmentObjective",
+                        "title": "Hydrological treatment objective",
+                        "type": "textarea"
+                    },
+                    {
+                        "type": "col",
+                        "items": [
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "type": "feature",
+                                        "source": "sitesOfCatchmentManaged"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "row",
+                                "items": [
+                                    {
+                                        "source": "areaOfCatchmentManagedHa",
+                                        "type": "number",
+                                        "displayOptions": {
+                                            "displayUnits": true
+                                        }
+                                    }
+                                ]
+                            }
+
+                        ],
+                        "width": "10%",
+                        "title": "Site/s of catchment being managed as a result of this management action"
+                    }
+                ],
+                "userAddedRows": true,
+                "source": "hydrologicalRegimeDetails",
+                "type": "table"
+            },
+            {
+                "type": "row",
+                "items": [{
+                    "preLabel": "Optionally attach photos",
+                    "source": "photographicEvidence",
+                    "type": "image"
+                }]
+            }
+        ]
+    }]
+}

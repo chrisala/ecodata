@@ -1,30 +1,33 @@
 package au.org.ala.ecodata
 
-import org.joda.time.DateTimeZone
-import org.joda.time.format.DateTimeFormatter
-import org.joda.time.DateTime
-import org.joda.time.format.ISODateTimeFormat
-
-import static au.org.ala.ecodata.Status.ACTIVE
-import static au.org.ala.ecodata.Status.DELETED
-
 import au.com.bytecode.opencsv.CSVWriter
 import au.org.ala.web.AuthService
 import grails.converters.JSON
+import grails.util.Holders
 import groovy.json.JsonSlurper
 import org.apache.commons.io.FileUtils
 import org.apache.commons.lang.StringEscapeUtils
+import org.apache.commons.lang.time.DateUtils
 import org.apache.http.client.methods.HttpPost
 import org.apache.http.entity.mime.HttpMultipartMode
 import org.apache.http.entity.mime.MultipartEntity
 import org.apache.http.entity.mime.content.FileBody
 import org.apache.http.entity.mime.content.StringBody
 import org.apache.http.impl.client.DefaultHttpClient
+import org.joda.time.DateTime
+import org.joda.time.DateTimeZone
+import org.joda.time.format.DateTimeFormatter
+import org.joda.time.format.ISODateTimeFormat
+
+import static au.org.ala.ecodata.Status.ACTIVE
+import static au.org.ala.ecodata.Status.DELETED
+import static grails.async.Promises.task
 
 /**
  * Services for handling the creation of records with images.
  */
 class RecordService {
+    private static final Object LOCK_1 = new Object() {};
     static transactional = false
 
     def grailsApplication
@@ -33,12 +36,12 @@ class RecordService {
     OutputService outputService
     ProjectService projectService
     SiteService siteService
-    AuthService authService
     UserService userService
     RecordAlertService recordAlertService
     SensitiveSpeciesService sensitiveSpeciesService
     DocumentService documentService
     CommonService commonService
+    AuthService authService
 
     final def ignores = ["action", "controller", "associatedMedia"]
     private static final List<String> EXCLUDED_RECORD_PROPERTIES = ["_id", "activityId", "dateCreated", "json", "outputId", "projectActivityId", "projectId", "status", "dataResourceUid"]
@@ -137,27 +140,27 @@ class RecordService {
         recordList.each {
             Map map = toMap(it)
             csvWriter.writeNext([
-                    map.occurrenceID?:"",
-                    map.scientificName?:"",
-                    map.family?:"",
-                    map.kingdom?:"",
-                    map.decimalLatitude?:"",
-                    map.decimalLongitude?:"",
-                    map.eventDate?:"",
-                    map.userId?:"",
-                    map.recordedBy?:"",
-                    map.usingReverseGeocodedLocality?:"",
-                    map.individualCount?:"",
-                    map.submissionMethod?:"",
-                    map.georeferenceProtocol?:"",
-                    map.identificationVerificationStatus?:"",
-                    map.occurrenceRemarks?:"",
-                    map.coordinateUncertaintyInMeters?:"",
-                    map.geodeticDatum?:"",
-                    map.imageLicence?:"",
-                    map.locality?:"",
-                    map.multimedia ? map.multimedia.collect {it.identifier}.join(";") : "",
-                    it.lastUpdated ? it.lastUpdated.format("dd-MM-yyyy")  : ""
+                    map.occurrenceID ?: "",
+                    map.scientificName ?: "",
+                    map.family ?: "",
+                    map.kingdom ?: "",
+                    map.decimalLatitude ?: "",
+                    map.decimalLongitude ?: "",
+                    map.eventDate ?: "",
+                    map.userId ?: "",
+                    map.recordedBy ?: "",
+                    map.usingReverseGeocodedLocality ?: "",
+                    map.individualCount ?: "",
+                    map.submissionMethod ?: "",
+                    map.georeferenceProtocol ?: "",
+                    map.identificationVerificationStatus ?: "",
+                    map.occurrenceRemarks ?: "",
+                    map.coordinateUncertaintyInMeters ?: "",
+                    map.geodeticDatum ?: "",
+                    map.imageLicence ?: "",
+                    map.locality ?: "",
+                    map.multimedia ? map.multimedia.collect { it.identifier }.join(";") : "",
+                    it.lastUpdated ? it.lastUpdated.format("dd-MM-yyyy") : ""
             ] as String[])
         }
         csvWriter.flush()
@@ -196,16 +199,16 @@ class RecordService {
      * @param json
      * @return
      */
-    def  createRecord(json){
+    def createRecord(json, boolean doNotAlert = false) {
         Record record = new Record().save(true)
-        updateRecord(record, json)
+        updateRecord(record, json, [:], doNotAlert)
         record
     }
 
     def getAllByActivity(String activityId, String projectId = null, version = null) {
         if (version) {
             def all = AuditMessage.findAllByProjectIdAndEntityTypeAndDateLessThanEquals(projectId, Record.class.name,
-                    new Date(version as Long), [sort:'date', order:'desc'])
+                    new Date(version as Long), [sort: 'date', order: 'desc'])
             def records = []
             def found = []
             all?.each {
@@ -229,7 +232,7 @@ class RecordService {
                 it.id
             }
             def all = AuditMessage.findAllByEntityIdInListAndEntityTypeAndDateLessThanEquals(recordIds, Record.class.name,
-                    new Date(version as Long), [sort:'date', order:'desc'])
+                    new Date(version as Long), [sort: 'date', order: 'desc'])
             def records = []
             def found = []
             all?.each {
@@ -252,15 +255,19 @@ class RecordService {
         Record.findAllByProjectIdAndStatus(projectId, ACTIVE).collect { toMap(it) }
     }
 
+    def getAllRecordsByActivityList(List<String> activityList) {
+        Record.findAllByActivityIdInList(activityList).collect { toMap(it) }
+    }
+
     /**
      * Create a record with the supplied map of fileName -> byte[].
      *
      * @param json
      * @param fileMap
      */
-    def createRecordWithImages(json, fileMap){
+    def createRecordWithImages(json, fileMap, boolean doNotAlert = false) {
         Record record = new Record().save(true)
-        def errors = updateRecord(record, json, fileMap)
+        def errors = updateRecord(record, json, fileMap, doNotAlert)
         [record, errors]
     }
 
@@ -307,10 +314,12 @@ class RecordService {
      *
      * @throws Exception in case of a validation failure or any unexpected system exception
      */
-    private void updateRecord(Record record, json, Map imageMap = [:]) {
+    private void updateRecord(Record record, json, Map imageMap = [:], boolean doNotAlert = false) {
 
         def userDetails = userService.getCurrentUserDetails()
-        if (!userDetails && json.userId) {
+        // Always ownership of record to user id in the properties. It is now possible for Administrators to regenerate records for the whole project.
+        // This prevents ownership being assigned to them.
+        if (json.userId) {
             userDetails = authService.getUserForUserId(json.userId)
         }
 
@@ -328,7 +337,7 @@ class RecordService {
                 record[it.key] = it.value.toString().toInteger()
             } else if (it.key in ["eventDate"] && it.value) {
                 String parsedDate = toStringIsoDateTime(it.value)
-                if(parsedDate) {
+                if (parsedDate) {
                     record[it.key] = parsedDate
                 }
             } else if (it.key in ["dateCreated", "lastUpdated"] && it.value) {
@@ -341,17 +350,17 @@ class RecordService {
         // Apply sensitive coordinates
         def activity = getProjectActivityService().get(record?.projectActivityId)
         String name = getSpeciesName(record, activity)
-        if(record.decimalLatitude && record.decimalLongitude && name) {
+        if (record.decimalLatitude && record.decimalLongitude && name) {
             Map sensitive = sensitiveSpeciesService.findSpecies(name.trim(), record.decimalLatitude, record.decimalLongitude)
-            if(sensitive?.lat && sensitive?.lng){
-                record.generalizedDecimalLatitude  = sensitive.lat
+            if (sensitive?.lat && sensitive?.lng) {
+                record.generalizedDecimalLatitude = sensitive.lat
                 record.generalizedDecimalLongitude = sensitive.lng
             }
         }
 
         //if no projectId is supplied, use default
         if (!record.projectId) {
-            record.projectId = grailsApplication.config.records.default.projectId
+            record.projectId = grailsApplication.config.getProperty('records.default.projectId')
         }
 
         //use the data resource UID associated with the project
@@ -363,54 +372,83 @@ class RecordService {
 
         //persist any supplied images into imageMetadata service
         if (json.multimedia) {
+            try {
+                json.multimedia.eachWithIndex { image, idx ->
 
-            json.multimedia.eachWithIndex { image, idx ->
+                    record.multimedia[idx] = [:]
 
-                record.multimedia[idx] = [:]
+                    // Each image in Ecodata may have an associated Document entity. We need to maintain this relationship in the resulting Record entity
+                    record.multimedia[idx].documentId = image.documentId
 
-                // Each image in Ecodata may have an associated Document entity. We need to maintain this relationship in the resulting Record entity
-                record.multimedia[idx].documentId = image.documentId
+                    // reconcile new with old images...
+                    // Only upload images that are NOT already in images.ala.org.au
+                    if (!image.creator) {
+                        image.creator = userDetails.displayName
+                    }
 
-                // reconcile new with old images...
-                // Only upload images that are NOT already in images.ala.org.au
-                if (!image.creator) {
-                    image.creator = userDetails.displayName
+                    if (!image.rightsHolder) {
+                        image.rightsHolder = userDetails.displayName
+                    }
+
+                    def alreadyLoaded = false
+
+                    def document = documentService.get(image.documentId)
+
+                    // Rely on document to check whether image has been uploaded to image server. Output data will not have imageId.
+                    if (!document.imageId) {
+                        log.debug "Uploading imageMetadata - ${image.identifier}"
+                        File downloadedFile
+                        boolean toDelete = false
+                        if (document.filepath && document.filename) {
+                            downloadedFile = new File(documentService.fullPath(document.filepath, document.filename))
+                        }
+
+                        if (!downloadedFile.exists() && image.identifier) {
+                            downloadedFile = download(record.occurrenceID, idx, image.identifier)
+                            toDelete = true
+                        }
+
+                        if(downloadedFile) {
+                            def imageId = uploadImage(record, downloadedFile, image)
+                            if (imageId) {
+                                // successfully uploaded image to server
+                                record.multimedia[idx].imageId = imageId
+                                record.multimedia[idx].identifier = getImageUrl(imageId)
+                                document.imageId = imageId
+                                documentService.update(document, document.documentId)
+                            }
+                            else {
+                                // use document
+                                record.multimedia[idx].identifier = document.url
+                            }
+
+                            if (toDelete) {
+                                downloadedFile.delete()
+                            }
+                        }
+                    } else {
+                        alreadyLoaded = true
+                        //re-use the existing imageId rather than upload again
+                        log.debug "Image already uploaded - ${document.imageId}"
+                        record.multimedia[idx].imageId = document.imageId
+                        record.multimedia[idx].identifier = getImageUrl(document.imageId)
+                        if (record.multimedia[idx].identifier != document.identifier) {
+                            documentService.update([identifier: record.multimedia[idx].identifier], document.documentId)
+                        }
+                    }
+
+                    setDCTerms(image, record.multimedia[idx])
+
+                    if (alreadyLoaded) {
+                        log.debug "Refreshing metadata - ${image.identifier}"
+                        //refresh metadata in imageMetadata service
+                        updateImageMetadata(image.imageId, record, record.multimedia[idx])
+                    }
                 }
-
-                if (!image.rightsHolder) {
-                    image.rightsHolder = userDetails.displayName
-                }
-
-                def alreadyLoaded = false
-
-                def document = documentService.get(image.documentId)
-
-                // Rely on document to check whether image has been uploaded to image server. Output data will not have imageId.
-                if (!document.imageId) {
-                    log.debug "Uploading imageMetadata - ${image.identifier}"
-                    def downloadedFile = download(record.occurrenceID, idx, image.identifier)
-                    def imageId = uploadImage(record, downloadedFile, image)
-                    record.multimedia[idx].imageId = imageId
-                    record.multimedia[idx].identifier = getImageUrl(imageId)
-                    document.imageId = imageId
-                    documentService.update(document, document.documentId)
-
-                } else {
-                    alreadyLoaded = true
-                    //re-use the existing imageId rather than upload again
-                    log.debug "Image already uploaded - ${image.imageId}"
-                    record.multimedia[idx].imageId = image.imageId
-                    record.multimedia[idx].identifier = image.identifier
-                }
-
-                setDCTerms(image, record.multimedia[idx])
-
-                if (alreadyLoaded) {
-                    log.debug "Refreshing metadata - ${image.identifier}"
-                    //refresh metadata in imageMetadata service
-                    updateImageMetadata(image.imageId, record, record.multimedia[idx])
-                }
+            } catch (Exception ex) {
+                log.error("Error uploading image to ${grailsApplication.config.getProperty('imagesService.baseURL')} -${ex.message}")
             }
+
         } else if (imageMap) {
             //upload the images supplied as bytes
             def idx = 0
@@ -429,12 +467,13 @@ class RecordService {
             }
         }
         record.save(flush: true)
-        recordAlertService.alertSubscribers(record)
+        // we do not want to alert users every time admin regenerates records
+        !doNotAlert && recordAlertService.alertSubscribers(record)
     }
 
     String toStringIsoDateTime(def date) {
 
-        if(date instanceof Date) {
+        if (date instanceof Date) {
             return new DateTime(date, DateTimeZone.UTC).toDateTimeISO().toString()
         } else {
             String dateString = date.toString()
@@ -445,13 +484,14 @@ class RecordService {
                 // No exceptions, the string is an ISO date
                 return dateString
 
-            } catch (IllegalArgumentException e) { // input parameter is not parsable to an iso Date with optional time, let's ignore it
+            } catch (IllegalArgumentException e) {
+                // input parameter is not parsable to an iso Date with optional time, let's ignore it
                 return null
             }
         }
     }
 
-    private setDCTerms(image, multimediaElement){
+    private setDCTerms(image, multimediaElement) {
         multimediaElement.license = image.license
         multimediaElement.rights = image.rights
         multimediaElement.rightsHolder = image.rightsHolder
@@ -461,8 +501,8 @@ class RecordService {
         multimediaElement.creator = image.creator
     }
 
-    private def getImageUrl(imageId){
-        grailsApplication.config.imagesService.baseURL + "/image/proxyImageThumbnailLarge?imageId=" + imageId
+    private def getImageUrl(imageId) {
+        grailsApplication.config.getProperty('imagesService.baseURL') + "/image/proxyImageThumbnailLarge?imageId=" + imageId
     }
 
     /**
@@ -472,10 +512,10 @@ class RecordService {
      * @param originalName
      * @param imageAsBytes
      */
-    private def uploadImageInByteArray(Record record, String originalName, byte[] imageAsBytes, Map metadata){
+    private def uploadImageInByteArray(Record record, String originalName, byte[] imageAsBytes, Map metadata) {
 
         //write bytes to temp file
-        def fileToUpload = File.createTempFile("multipart-upload-" + System.currentTimeMillis(),".tmp")
+        def fileToUpload = File.createTempFile("multipart-upload-" + System.currentTimeMillis(), ".tmp")
         fileToUpload.withOutputStream {
             it.write imageAsBytes
         }
@@ -483,7 +523,7 @@ class RecordService {
         //upload
         def imageId = uploadImage(record, fileToUpload, metadata)
 
-        if(!record.multimedia){
+        if (!record.multimedia) {
             record.multimedia = []
         }
 
@@ -495,23 +535,37 @@ class RecordService {
     }
 
 
-
-    def listByProjectId (Map params, Date lastUpdated, List restrictedProjectActivities = []){
+    def listByProjectId(Map params, Date lastUpdated, List restrictedProjectActivities = []) {
         def list = Record.createCriteria().list(max: params.max, offset: params.offset) {
             and {
-                if(lastUpdated) {
+                if (lastUpdated) {
                     'gt'('lastUpdated', lastUpdated)
                 }
                 eq "projectId", params.projectId
                 eq "status", params.status
                 not { 'in' "projectActivityId", restrictedProjectActivities }
             }
-            //order(params.sort, params.order)
+            order(params.sort, params.order)
         }
 
         [total: list?.totalCount, list: list?.collect { toMap(it) }]
-   }
+    }
 
+    def list(Map params) {
+        def list = Record.createCriteria().list(max: params.max, offset: params.offset) {
+            params.query?.each { prop, value ->
+
+                if (value instanceof List) {
+                    inList(prop, value)
+                } else {
+                    eq(prop, value)
+                }
+            }
+            order(params.sort, params.order)
+        }
+
+        [total: list?.totalCount, list: list?.collect { toMap(it) }]
+    }
 
     /**
      * Update the metadata for an imageMetadata in the imageMetadata service.
@@ -522,18 +576,18 @@ class RecordService {
      * @param metadataProperties
      * @return
      */
-    private def updateImageMetadata(String imageId, record, metadataProperties){
+    private def updateImageMetadata(String imageId, record, metadataProperties) {
 
         log.info("Updating imageMetadata metadata for imageMetadata: ${imageId} from record ${record.occurrenceID}")
 
         //upload an image metadata
         def entity = new MultipartEntity(HttpMultipartMode.BROWSER_COMPATIBLE)
         entity.addPart("metadata", new StringBody(([
-                "title": metadataProperties.title,
-                "creator": metadataProperties.creator,
-                "rights": metadataProperties.rights,
+                "title"       : metadataProperties.title,
+                "creator"     : metadataProperties.creator,
+                "rights"      : metadataProperties.rights,
                 "rightsHolder": metadataProperties.rightsHolder ? metadataProperties.rightsHolder : metadataProperties.creator,
-                "license": metadataProperties.license
+                "license"     : metadataProperties.license
         ] as JSON).toString()))
 
         if (record.tags) {
@@ -541,9 +595,10 @@ class RecordService {
         }
 
         def httpClient = new DefaultHttpClient()
-        def httpPost = new HttpPost(grailsApplication.config.imagesService.baseURL + "/ws/updateMetadata/${imageId}")
+        def httpPost = new HttpPost(grailsApplication.config.getProperty('imagesService.baseURL') + "/ws/updateMetadata/${imageId}")
+        httpPost.setHeader("X-ALA-userId", "${record.userId}");
+        httpPost.setHeader('apiKey', "${grailsApplication.config.getProperty('api_key')}");
         httpPost.setEntity(entity)
-        httpPost.addHeader("X-ALA-userId", "${record.userId}");
         def response = httpClient.execute(httpPost)
         def result = response.getStatusLine()
     }
@@ -556,7 +611,7 @@ class RecordService {
      * @param imageMetadata
      * @return
      */
-    private def uploadImage (Record record, File fileToUpload, imageMetadata) {
+    private def uploadImage(Record record, File fileToUpload, imageMetadata) {
 
         //upload an imageMetadata
         def entity = new MultipartEntity(HttpMultipartMode.BROWSER_COMPATIBLE)
@@ -569,17 +624,17 @@ class RecordService {
         log.debug "imageMetadata upload: ${imageMetadata}"
         entity.addPart("image", fileBody)
         entity.addPart("metadata", new StringBody(([
-                "occurrenceId": record.occurrenceID,
-                "projectId": record.projectId,
-                "dataResourceUid": record.dataResourceUid,
+                "occurrenceId"    : record.occurrenceID,
+                "projectId"       : record.projectId,
+                "dataResourceUid" : record.dataResourceUid,
                 "originalFilename": imageMetadata.title,
-                "title": imageMetadata.title,
-                "creator": imageMetadata.creator,
-                "rights": imageMetadata.rights,
-                "rightsHolder": imageMetadata.rightsHolder ? imageMetadata.rightsHolder : imageMetadata.creator,
-                "license": imageMetadata.license,
-                "dateTaken": imageMetadata?.created,
-                "systemSupplier": grailsApplication.config.imageSystemSupplier?:"ecodata"
+                "title"           : imageMetadata.title,
+                "creator"         : imageMetadata.creator,
+                "rights"          : imageMetadata.rights,
+                "rightsHolder"    : imageMetadata.rightsHolder ? imageMetadata.rightsHolder : imageMetadata.creator,
+                "license"         : imageMetadata.license,
+                "dateTaken"       : imageMetadata?.created,
+                "systemSupplier"  : grailsApplication.config.getProperty('imageSystemSupplier') ?: "ecodata"
         ] as JSON).toString()))
 
         if (record.tags) {
@@ -587,29 +642,27 @@ class RecordService {
         }
 
         def httpClient = new DefaultHttpClient()
-        def httpPost = new HttpPost(grailsApplication.config.imagesService.baseURL + "/ws/uploadImage")
+        def httpPost = new HttpPost(grailsApplication.config.getProperty('imagesService.baseURL') + "/ws/uploadImage")
+        httpPost.setHeader("X-ALA-userId", "${record.userId}");
+        httpPost.setHeader('apiKey', "${grailsApplication.config.getProperty('api_key')}");
         httpPost.setEntity(entity)
-        httpPost.addHeader("X-ALA-userId", "${record.userId}");
         def response = httpClient.execute(httpPost)
         def result = response.getStatusLine()
         def responseBody = response.getEntity().getContent().getText()
-
         log.debug("Image service response code: " + result.getStatusCode())
-
         def jsonSlurper = new JsonSlurper()
-
         def map = jsonSlurper.parseText(responseBody)
         log.debug("Image ID: " + map["imageId"])
-        if(!map["imageId"]){
+        if (!map["imageId"]) {
             log.error("Problem uploading images. Response: " + map)
         }
         map["imageId"]
     }
 
-    private File download(recordId, idx, address){
-        def directory = grailsApplication.config.app.file.upload.path + File.separator + "record" + File.separator  + recordId
+    private File download(recordId, idx, address) {
+        def directory = grailsApplication.config.getProperty('temp.dir') + File.separator + "record" + File.separator + recordId
         File mediaDir = new File(directory)
-        if (!mediaDir.exists()){
+        if (!mediaDir.exists()) {
             FileUtils.forceMkdir(mediaDir)
         }
         def destFile = new File(directory + File.separator + idx + "_" + address.tokenize("/")[-1])
@@ -637,9 +690,10 @@ class RecordService {
         record ? toMap(record) : [:]
     }
 
-    def toMap(record){
-        def dbo = record.getProperty("dbo")
-        def mapOfProperties = dbo.toMap()
+    def toMap(record) {
+        def mapOfProperties = GormMongoUtil.extractDboProperties(record.getProperty("dbo"))
+        //def mapOfProperties = dbo.toMap()
+        mapOfProperties.recordNumber = record.getRecordNumber(grailsApplication.config.getProperty('biocollect.activity.sightingsUrl')) //record.recordNumber
         mapOfProperties.remove("_id")
         mapOfProperties
     }
@@ -647,7 +701,7 @@ class RecordService {
     /**
      * Export project sightings to CSV.
      */
-    def exportCSVProject(OutputStream outputStream, String projectId, String modelName, String userId, List<String> restrictedProjectActivities){
+    def exportCSVProject(OutputStream outputStream, String projectId, String modelName, String userId, List<String> restrictedProjectActivities) {
         CSVWriter csvWriter = new CSVWriter(new OutputStreamWriter(outputStream))
         csvWriter.writeNext(
                 [
@@ -755,8 +809,8 @@ class RecordService {
     }
 
     private def mapDates(today, plannedStart, plannedEnd, actualStart, actualEnd) {
-        def dStart = actualStart?: plannedStart
-        def dEnd = actualEnd?: plannedEnd
+        def dStart = actualStart ?: plannedStart
+        def dEnd = actualEnd ?: plannedEnd
         if (dStart && dEnd) return dStart.format("dd-MM-yyyy") + ' ' + dEnd.format("dd-MM-yyyy")
         if (dStart) return dStart.format("dd-MM-yyyy") + ' ' + today
         return null
@@ -767,16 +821,12 @@ class RecordService {
      * (in order of increasing overwrite preference)
      *
      * Project:
-     *     site(projectSiteId) {
-     *       siteId -> locationId
-     *       extent.geometry or poi[0].geometry {
-     *         locality -> locality
+     *     site(projectSiteId) {*       siteId -> locationId
+     *       extent.geometry or poi[0].geometry {*         locality -> locality
      *         uncertainty -> coordinateUncertaintyInMeters
      *         centre[0] -> decimalLongitude
      *         centre[1] -> decimalLatitude
-     *       }
-     *     }
-     *     plannedStartDate/actualStartDate plannedEndDate/actualEndDate/today -> eventDate
+     *}*}*     plannedStartDate/actualStartDate plannedEndDate/actualEndDate/today -> eventDate
      *
      * Activity:
      *     site(siteId) -> [overwrite mappings from project site]
@@ -812,7 +862,7 @@ class RecordService {
             dwc.occurrenceRemarks = output.eventNotes
 
         // map species info
-        def species = model.find {it.dataType == "species"}
+        def species = model.find { it.dataType == "species" }
         if (species) dwc.scientificName = output[species.name].name
 
         // process exlpicit mappings
@@ -825,7 +875,7 @@ class RecordService {
         }
 
         // determine potential subtree for recursive record generation
-        def subtree = model.find {it.dataType == "list" && it.darwinCore}
+        def subtree = model.find { it.dataType == "list" && it.darwinCore }
         if (subtree) {
             output = output[subtree.name]
             if (output && output[0] instanceof Object) {
@@ -843,28 +893,28 @@ class RecordService {
         // if no valid subtree was found, we are at a leaf node, so emit it
         csvWriter.writeNext(
                 [
-                        dwc.occurrenceID?:"",
-                        dwc.scientificName?:"",
-                        dwc.family?:"",
-                        dwc.kingdom?:"",
-                        dwc.decimalLatitude?:"",
-                        dwc.decimalLongitude?:"",
-                        dwc.eventDate?:"",
-                        dwc.userId?:"",
-                        dwc.recordedBy?:"",
-                        dwc.usingReverseGeocodedLocality?:"",
-                        dwc.individualCount?:"",
-                        dwc.submissionMethod?:"",
-                        dwc.georeferenceProtocol?:"",
-                        dwc.identificationVerificationStatus?:"",
-                        dwc.occurrenceRemarks?:"",
-                        dwc.coordinateUncertaintyInMeters?:"",
-                        dwc.geodeticDatum?:"",
-                        dwc.imageLicence?:"",
-                        dwc.locality?:"",
-                        dwc.multimedia ? dwc.multimedia.collect {it.identifier}.join(";") : "",
-                        dwc.modified?:"",
-                        dwc.locationID?:""
+                        dwc.occurrenceID ?: "",
+                        dwc.scientificName ?: "",
+                        dwc.family ?: "",
+                        dwc.kingdom ?: "",
+                        dwc.decimalLatitude ?: "",
+                        dwc.decimalLongitude ?: "",
+                        dwc.eventDate ?: "",
+                        dwc.userId ?: "",
+                        dwc.recordedBy ?: "",
+                        dwc.usingReverseGeocodedLocality ?: "",
+                        dwc.individualCount ?: "",
+                        dwc.submissionMethod ?: "",
+                        dwc.georeferenceProtocol ?: "",
+                        dwc.identificationVerificationStatus ?: "",
+                        dwc.occurrenceRemarks ?: "",
+                        dwc.coordinateUncertaintyInMeters ?: "",
+                        dwc.geodeticDatum ?: "",
+                        dwc.imageLicence ?: "",
+                        dwc.locality ?: "",
+                        dwc.multimedia ? dwc.multimedia.collect { it.identifier }.join(";") : "",
+                        dwc.modified ?: "",
+                        dwc.locationID ?: ""
                 ] as String[]
         )
     }
@@ -875,11 +925,12 @@ class RecordService {
     * (Refactor BioCollect autocomplete to store both scientific and common name.)
     *
     * */
-    public String getSpeciesName(record, projectActivity){
+
+    public String getSpeciesName(record, projectActivity) {
         String name = ''
-        if(record && projectActivity){
+        if (record && projectActivity) {
             name = record.name
-            switch(projectActivity?.species?.speciesDisplayFormat) {
+            switch (projectActivity?.species?.speciesDisplayFormat) {
                 case 'SCIENTIFICNAME(COMMONNAME)':
                     List tokens = record.name ? record.name?.tokenize('(') : []
                     if (tokens && tokens.size() == 2) {
@@ -893,7 +944,7 @@ class RecordService {
                     }
                     break
                 case 'COMMONNAME(SCIENTIFICNAME)':
-                    List tokens = record.name ? record.name?.tokenize( '(' ) : []
+                    List tokens = record.name ? record.name?.tokenize('(') : []
                     name = tokens ? tokens.get(0)?.trim() : record.name
                     break
                 case 'SCIENTIFICNAME':
@@ -905,5 +956,167 @@ class RecordService {
         }
 
         name
+    }
+
+    /**
+     * Event date has a variety of standards. This will try and convert it into Date object.
+     * @param eventDate
+     * @return
+     */
+    Date parseDate(String eventDate) {
+        Date date
+        try {
+            date = DateUtils.parseDate(eventDate, ["yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ssXX", "yyyy-MM-dd'T'HH:mm:ssX", "dd-MM-yyyy"] as String[])
+        } catch (Exception pe) {
+            log.error("Error parsing date ${eventDate}")
+        }
+
+        date
+    }
+
+    /**
+     * Get license for a record by looking up license from project activity or return default license
+     * @param record
+     * @return
+     */
+    String getLicense(Map record) {
+        if (record.projectActivityId) {
+            Map projectActivity = projectActivityService.get(record.projectActvityId)
+            if (projectActivity.dataSharingLicense) {
+                return projectActivity.dataSharingLicense
+            }
+        }
+
+        return grailsApplication.config.getProperty('license.default');
+    }
+
+    /**
+     * regenerate records for all BioCollect projects
+     * @return
+     */
+    def regenerateRecordsForBioCollectProjects() {
+        task {
+            // prevent simultaneous record generation when clicked multiple times.
+            synchronized (LOCK_1) {
+                Project.withNewSession { session ->
+                    int projectMax = Holders.grailsApplication.config?.getProperty('records.project.max', Integer, 20)
+                    def pagination = [
+                            max   : projectMax,
+                            offset: 0,
+                            arrange: [
+                                    order : 'desc',
+                                    sort  : 'lastUpdated'
+                            ],
+                            searchCriteria: [
+                                    isMERIT: false,
+                                    isExternal: false,
+                                    status: [ACTIVE]
+                            ]
+                    ]
+
+                    int counter = 1
+                    def projects = projectService.listProjects(pagination)
+                    int total = projects.total
+                    while (projects?.list) {
+                        projects.list.each { Project project ->
+                            log.info("Starting project ${project.name} ${project.projectId} number ${counter++} of ${total}")
+                            regenerateRecordsForProject(project)
+                        }
+
+                        session.clear()
+                        pagination.offset += pagination.max
+                        projects = projectService.listProjects(pagination)
+                    }
+                }
+            }
+        }
+        .onComplete {
+            log.info("Record regeneration task completed")
+        }
+        .onError { Throwable error ->
+            log.info("Record regeneration task stopped with an error", error)
+        }
+    }
+
+    /**
+     * Update or create darwin core records for activities in a project.
+     * @param project
+     * @param counter
+     * @param total
+     * @param session
+     * @return
+     */
+    public void regenerateRecordsForProject(def project) {
+        String projectId = project.projectId
+        int activityMax = Holders.grailsApplication.config?.getProperty('records.activity.max', Integer, 20)
+        Map activityParams = [
+                max    : activityMax,
+                offset : 0,
+                sort: 'id',
+                order: 'desc'
+        ]
+
+        Map searchCriteria = [
+                projectId: projectId
+        ]
+
+        List activities = activityService.searchAndListActivityDomainObjects(searchCriteria, null, null, null, activityParams)
+
+        while (activities) {
+            activities?.parallelStream().forEach({ Activity activity ->
+                regenerateRecordsForActivity(activity)
+            })
+
+            if (activityParams.offset % 100 == 0) {
+                log.info("Fetching activities from offset ${activityParams.offset} of project ${project.name} ${project.projectId} ")
+                Activity.withSession { session -> session.clear() }
+            }
+
+            activityParams.offset += activityParams.max
+            activities = activityService.searchAndListActivityDomainObjects(searchCriteria, null, null, null, activityParams)
+        }
+    }
+
+    /**
+     * Update or create darwin core records for species in an activity.
+     * @param activity
+     * @return
+     */
+    public void regenerateRecordsForActivity(Activity activity) {
+        String activityId = activity.activityId
+        Output.withNewSession { outputSession ->
+            Map params = [query: [activityId: activityId]]
+            Map outputs = outputService.list(params)
+
+            outputs?.list?.each { Output output ->
+                try {
+                    regenerateRecordsForOutput(output, activity, true)
+                }
+                catch (Exception e) {
+                    log.error("Exception during processing of output - ${output?.outputId}", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * Update or create darwin core records for species in an output.
+     * @param output
+     * @param activity
+     */
+    public void regenerateRecordsForOutput(Output output, Activity activity, boolean doNotAlert = false) {
+        String outputId = output?.outputId
+        Map props = outputService.toMap(output)
+        outputService.createOrUpdateRecordsForOutput(activity, output, props, doNotAlert)
+
+        // The createOrUpdateRecordsForOutput method can assign outputSpeciesIds so we need to check if
+        // the output has changed.
+        Map before = null
+        Output.withNewSession {
+            before = outputService.toMap(Output.findByOutputId(outputId))
+        }
+        if (props != before) {
+            commonService.updateProperties(output, props)
+        }
     }
 }

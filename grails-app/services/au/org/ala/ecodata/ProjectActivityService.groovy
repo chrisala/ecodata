@@ -1,19 +1,35 @@
 package au.org.ala.ecodata
 
-import static au.org.ala.ecodata.Status.*
+import org.springframework.context.MessageSource
+
+import java.text.SimpleDateFormat
+
+import static au.org.ala.ecodata.Status.ACTIVE
+import static au.org.ala.ecodata.Status.DELETED
 
 class ProjectActivityService {
     static transactional = false
     static final DOCS = 'docs'
     static final ALL = 'all' // docs and sites
+    static final SUBSCRIBED_PROPERTIES = [
+            'methodName'
+    ]
+    static final PA_STATS_CACHE_KEY_PREFIX = 'projectactivity-stats-id-'
+    static final int MAX_QUERY_RESULT_SIZE = 20
+
+    def grailsApplication
 
     CommonService commonService
     DocumentService documentService
     SiteService siteService
+    SubmissionService   submissionService
     ActivityService activityService
     CommentService commentService
     PermissionService permissionService
     ElasticSearchService elasticSearchService
+    EmailService emailService
+    MessageSource messageSource
+    CacheService cacheService
 
     /**
      * Creates an project activity.
@@ -28,7 +44,7 @@ class ProjectActivityService {
         try {
             props.remove("projectId");
             props.remove("projectActivityId");
-
+            notifyChangeToAdmin(props)
             commonService.updateProperties(projectActivity, props)
 
             result = [status: 'ok', projectActivityId: projectActivity.projectActivityId]
@@ -61,6 +77,12 @@ class ProjectActivityService {
 
                 updateEmbargoDetails(projectActivity, props)
 
+              /*  if (props.submissionRecords) {
+                    updateAekosSubmission(projectActivity, props)
+                }*/
+
+                notifyChangeToAdmin(props, toMap(projectActivity))
+          //      props['test'] = 'dynamicProperty'
                 commonService.updateProperties(projectActivity, props)
 
                 result = [status: 'ok', projectActivityId: projectActivity.projectActivityId]
@@ -79,31 +101,66 @@ class ProjectActivityService {
         result
     }
 
-    private static updateEmbargoDetails(ProjectActivity projectActivity, Map incomingProperties) {
-        EmbargoOption option = incomingProperties.visibility?.embargoOption as EmbargoOption
+    private updateAekosSubmission(ProjectActivity projectActivity, Map incomingProperties) {
+        def submissionRecords = incomingProperties.submissionRecords
 
-        VisibilityConstraint visibility = new VisibilityConstraint()
-        switch (option) {
-            case EmbargoOption.NONE:
-                visibility.embargoOption = EmbargoOption.NONE
-                visibility.embargoUntil = null
-                visibility.embargoForDays = null
-                break
-            case EmbargoOption.DAYS:
-                visibility.embargoOption = EmbargoOption.DAYS
-                visibility.embargoForDays = incomingProperties.visibility?.embargoForDays
-                visibility.embargoUntil = EmbargoUtil.calculateEmbargoUntilDate(incomingProperties)
-                break
-            case EmbargoOption.DATE:
-                visibility.embargoOption = EmbargoOption.DATE
-                visibility.embargoForDays = null
-                visibility.embargoUntil = EmbargoUtil.calculateEmbargoUntilDate(incomingProperties)
-                break
+        incomingProperties.remove("submissionRecords")
+
+        submissionRecords.each {
+            Map prop = [:]
+            prop.putAll(it)
+
+            if (!it.submissionRecordId) {
+                prop.remove("datasetSubmitterUser")
+                prop.remove("submissionPackage")
+
+                String submissionRecId = Identifiers.getNew(true, '')
+
+                prop.put ("submissionRecordId", submissionRecId)
+                prop.put ("projectActivityId", projectActivity.projectActivityId)
+                SubmissionRecord submissionRecord = new SubmissionRecord (prop)
+
+                it.submissionPackage.put ("submissionRecordId", submissionRecId)
+                submissionRecord.submissionPackage = new SubmissionPackage (it.submissionPackage)
+                projectActivity.addToSubmissionRecords(submissionRecord)
+            } else {
+                String submissionRecId = it.submissionRecordId
+                submissionService.update (submissionRecId, prop)
+            }
+
         }
 
-        incomingProperties.remove("visibility")
-        projectActivity.visibility = visibility
+    }
 
+    private static updateEmbargoDetails(ProjectActivity projectActivity, Map incomingProperties) {
+        if(incomingProperties.visibility) {
+            EmbargoOption option = incomingProperties.visibility?.embargoOption as EmbargoOption
+            VisibilityConstraint visibility = new VisibilityConstraint()
+
+            // Project admin and Moderator defined embargo settings.
+            switch (option) {
+                case EmbargoOption.NONE:
+                    visibility.embargoOption = EmbargoOption.NONE
+                    visibility.embargoUntil = null
+                    visibility.embargoForDays = null
+                    break
+                case EmbargoOption.DAYS:
+                    visibility.embargoOption = EmbargoOption.DAYS
+                    visibility.embargoForDays = incomingProperties.visibility?.embargoForDays
+                    visibility.embargoUntil = EmbargoUtil.calculateEmbargoUntilDate(incomingProperties)
+                    break
+                case EmbargoOption.DATE:
+                    visibility.embargoOption = EmbargoOption.DATE
+                    visibility.embargoForDays = null
+                    visibility.embargoUntil = EmbargoUtil.calculateEmbargoUntilDate(incomingProperties)
+                    break
+            }
+
+            // ALA admin - Defined embargo settings.
+            visibility.alaAdminEnforcedEmbargo = incomingProperties.visibility?.alaAdminEnforcedEmbargo
+            incomingProperties.remove("visibility")
+            projectActivity.visibility = visibility
+        }
     }
 
     Map delete(String projectActivityId, boolean destroy = false) {
@@ -190,7 +247,7 @@ class ProjectActivityService {
      */
     Map toMap(projectActivity, levelOfDetail = []) {
         Map mapOfProperties = projectActivity instanceof ProjectActivity ?
-                projectActivity.getProperty("dbo").toMap() : projectActivity
+                GormMongoUtil.extractDboProperties(projectActivity.getProperty("dbo")) : projectActivity
 
         if (levelOfDetail == DOCS) {
             mapOfProperties["documents"] = documentService.findAllForProjectActivityId(mapOfProperties.projectActivityId)
@@ -200,12 +257,20 @@ class ProjectActivityService {
             mapOfProperties["sites"] = mapOfProperties.sites.collect {
                 siteService.get(it, "brief")
             }
+
         }
+
+        mapOfProperties["attribution"] = generateAttributionText(projectActivity)
+       /* mapOfProperties["submissionRecords"] = mapOfProperties.submissionRecords.collect {
+            submissionService.get(it)
+        } */
+
         String id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
 
         mapOfProperties.findAll { k, v -> v != null }
+        //GormMongoUtil.deepPrune(mapOfProperties)
     }
 
     List<String> listRestrictedProjectActivityIds(String userId = null, String projectId = null) {
@@ -269,8 +334,159 @@ class ProjectActivityService {
         restrictedProjectActivityIds
     }
 
-    def sitesContainsName(String id, String name) {
-        def pa = ProjectActivity.findByProjectActivityId(id)
-        return Site.countBySiteIdInListAndName(pa.sites, name) > 0
+    void addProjectActivityStats (Map projectActivity) {
+        Map statistics = cacheService.get(PA_STATS_CACHE_KEY_PREFIX + projectActivity?.projectActivityId, {
+            Map stats = [:]
+            stats.publicAccess = isProjectActivityDataPublic(projectActivity)
+            stats.activityLastUpdated = getLastUpdatedActivityForProjectActivity(projectActivity.projectActivityId)
+            stats.activityCount = getActivityCountForProjectActivity(projectActivity.projectActivityId)
+            stats.speciesRecorded = getSpeciesRecordedForProjectActivity(projectActivity.projectActivityId)
+            stats
+        })
+
+        projectActivity.stats = projectActivity.stats ?: [:]
+        projectActivity.stats.putAll(statistics)
+    }
+
+    boolean isProjectActivityDataPublic (Map projectActivity) {
+        EmbargoOption option = projectActivity.visibility?.embargoOption as EmbargoOption
+        if ((option != EmbargoOption.NONE) && (!projectActivity?.visibility?.embargoUntil?.after(new Date()) )) {
+            if ( Activity.countByProjectActivityIdAndStatus(projectActivity.projectActivityId, ACTIVE) > 0 ) {
+                return true
+            }
+        } else if (option == EmbargoOption.NONE) {
+            return  true
+        }
+
+        return false
+    }
+
+    int getActivityCountForProjectActivity(String pActivityId) {
+         Activity.countByProjectActivityIdAndStatus(pActivityId, ACTIVE)
+    }
+
+    Date getLastUpdatedActivityForProjectActivity(String pActivityId) {
+        return Activity.findByProjectActivityIdAndStatus(pActivityId, ACTIVE, [sort: 'lastUpdated', order: 'desc'])?.lastUpdated
+    }
+
+    int getSpeciesRecordedForProjectActivity(String pActivityId) {
+        return Record.countByProjectActivityIdAndStatus(pActivityId, ACTIVE)
+    }
+
+    def notifyChangeToAdmin(Map body, Map old = [:]) {
+        if (grailsApplication.config.getProperty('projectActivity.notifyOnChange')?.toBoolean()) {
+            List notify = notifiableProperties(body, old)
+            if (notify) {
+                String content = getNotificationContent(body, notify)
+                String subject = "New proposed survey method"
+                emailService.sendEmail(subject, content, [grailsApplication.config.getProperty('ecodata.support.email.address')])
+            }
+        }
+    }
+
+    def notifiableProperties (Map body, Map old) {
+        List notify = []
+        SUBSCRIBED_PROPERTIES.each {
+            if (old[it] != body[it]) {
+                notify.add(it)
+            }
+        }
+
+        notify
+    }
+
+    def getNotificationContent (Map body, List changedProps) {
+        List output = ["Please consider adding the following Survey Method(s) to the Survey methods select list:"]
+        changedProps?.each { key ->
+            output.add("${key} : ${body[key]}")
+        }
+        output.join('\n')
+    }
+
+    String generateAttributionText (ProjectActivity projectActivity) {
+        def name = projectActivity?.name
+        Project project = Project.findByProjectId(projectActivity?.projectId)
+        if (projectActivity && name && project) {
+            def orgName = project.organisationName
+            if (orgName) {
+                def calendar = Calendar.getInstance()
+                def year = calendar.get(Calendar.YEAR).toString()
+                SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy, HH:mm");
+                Calendar cal = Calendar.getInstance()
+                def time = dateFormat.format(cal.getTime())
+                def dataUrl = "${grailsApplication.config.getProperty('biocollect.projectActivityDataURL')}/${projectActivity.projectId}"
+                return messageSource.getMessage("projectAcitivity.attribution", [orgName, year, name, dataUrl, time].toArray(), "", Locale.default)
+            }
+        }
+
+        ""
+    }
+
+    String generateCollectoryAttributionText (ProjectActivity projectActivity) {
+        def name = projectActivity?.name
+        String attribution = ""
+        Project project = Project.findByProjectId(projectActivity?.projectId)
+        if (projectActivity && name && project) {
+            def orgName = project.organisationName
+            if (orgName) {
+                def calendar = Calendar.getInstance()
+                def year = calendar.get(Calendar.YEAR).toString()
+                attribution = [orgName, " (", year, ") ", name, " dataset"].join()
+                return attribution
+            }
+        }
+
+        attribution
+    }
+
+    /**
+     * @param criteria a Map of property name / value pairs.  Values may be primitive types or arrays.
+     * Multiple properties will be ANDed together when producing results.
+     *
+     * @return a list of the project activity that match the supplied criteria
+     */
+    List<Map> search(Map searchCriteria, levelOfDetail = []) {
+
+        def criteria = ProjectActivity.createCriteria()
+        def projectActivities = criteria.list {
+            ne("status", DELETED)
+            searchCriteria.each { prop, value ->
+
+                if (value instanceof List) {
+                    inList(prop, value)
+                } else {
+                    eq(prop, value)
+                }
+            }
+
+        }
+
+        projectActivities.collect { toMap(it, levelOfDetail) }
+    }
+
+    /**
+     * Activity linked to a project activity if
+     * 1. EmbargoOption is DAYS and today is before embargoUntil date
+     * 2. EmbargoOption is DATE and today is before embargoUntil date
+     * @param projectActivity
+     * @return
+     */
+    boolean isProjectActivityEmbargoed (projectActivity) {
+        switch (projectActivity?.visibility?.embargoOption) {
+            case EmbargoOption.DAYS:
+            case EmbargoOption.DATE:
+            case "DAYS":
+            case "DATE":
+                if (projectActivity?.visibility?.embargoUntil && projectActivity?.visibility?.embargoUntil.after(new Date())) {
+                    return true
+                }
+        }
+
+        false
+    }
+
+    List<ProjectActivity> list (int offset = 0, int max = MAX_QUERY_RESULT_SIZE) {
+        Map options = [offset:offset, max: Math.min(max, MAX_QUERY_RESULT_SIZE), sort:'projectId']
+        ProjectActivity.findAllByStatusNotEqual(Status.DELETED, options)
     }
 }

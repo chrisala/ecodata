@@ -1,74 +1,105 @@
 {
-    "dataModel": [{
-        "dataType": "list",
-        "name": "biomassControl",
-        "columns": [
+  "title": "Biomass Control Measures",
+  "modelName": "ESP Biomass Control Measures",
+  "dataModel": [
+    {
+      "dataType": "list",
+      "name": "biomassControl",
+      "columns": [
+        {
+          "dataType": "text",
+          "description": "The type of biomass control",
+          "name": "controlType",
+          "constraints": [
+            "Thinning",
+            "Small scale ecological burns",
+            "Slashing / mowing",
+            "Grazing"
+          ]
+        },
+        {
+          "dataType": "stringList",
+          "description": "",
+          "name": "controlPurpose",
+          "constraints": [
+            "Reduction of fire risks",
+            "Reduction of single species dominance",
+            "Removal of feral habitat",
+            "Weed control"
+          ],
+          "validate": "required"
+        },
+        {
+          "dataType": "number",
+          "name": "areaTreatedHa",
+          "validate": "min[0]"
+        },
+        {
+          "dataType": "number",
+          "name": "cost",
+          "validate": "integer,min[0]"
+        }
+      ]
+    },
+    {
+      "dataType": "text",
+      "name": "notes",
+      "description": ""
+    }
+  ],
+  "viewModel": [
+    {
+      "type": "row",
+      "items": [
+        {
+          "type": "literal",
+          "source": "<b>Please note</b> Activities to control Biomass are included under any or all of the following; “Monitor and manage dominant native species”, “Biomass control to reduce dominance of a single native plant species”, “Biomass Control” and “Thinning”."
+        }
+      ]
+    },
+    {
+      "items": [
+        {
+          "title": "",
+          "source": "biomassControl",
+          "columns": [
             {
-                "dataType": "text",
-                "description": "The type of biomass control",
-                "name": "controlType",
-                "constraints": [
-                    "Thinning",
-                    "Small scale ecological burns",
-                    "Slashing / mowing",
-                    "Grazing"
-                ]
+              "title": "Biomass control activity",
+              "source": "controlType",
+              "type": "selectOne"
             },
             {
-                "dataType": "text",
-                "description": "",
-                "name": "controlPurpose",
-                "constraints": [
-                    "Reduction of fire risks",
-                    "Reduction of single species dominance",
-                    "Removal of feral habitat",
-                    "Weed control"
-                ],
-                "validate": "required"
+              "title": "Purpose",
+              "source": "controlPurpose",
+              "type": "select2Many"
             },
             {
-                "dataType": "number",
-                "name": "areaTreatedHa",
-                "validate": "required,min[0]"
+              "title": "Area treated (Ha)",
+              "source": "areaTreatedHa",
+              "type": "number"
             },
             {
-                "dataType": "number",
-                "name": "cost",
-                "validate": "integer,min[0]"
+              "title": "Cost",
+              "source": "cost",
+              "type": "currency"
             }
-        ]
-    }],
-    "modelName": "ESP Biomass Control Measures",
-    "title": "Biomass Control Measures",
-    "viewModel": [{
-        "items": [{
-            "title": "",
-            "source": "biomassControl",
-            "columns": [
-                {
-                    "title": "Biomass control activity",
-                    "source": "controlType",
-                    "type": "selectOne"
-                },
-                {
-                    "title": "Purpose",
-                    "source": "controlPurpose",
-                    "type": "selectOne"
-                },
-                {
-                    "title": "Area treated (Ha)",
-                    "source": "areaTreatedHa",
-                    "type": "number"
-                },
-                {
-                    "title": "Cost",
-                    "source": "cost",
-                    "type": "currency"
-                }
-            ],
-            "userAddedRows": true,
-            "type": "table"
-        }],
-        "type": "row"
-    }]
+          ],
+          "userAddedRows": true,
+          "disableTableUpload": true,
+          "type": "table"
+        }
+      ],
+      "type": "row"
+    },
+    {
+      "type": "row",
+      "items": [
+        {
+          "type": "textarea",
+          "source": "notes",
+          "preLabel": "If you would like to provide further observations or comments regarding activities you have undertaken please fill out the textbox below:"
+        }
+      ]
+    }
+  ]
 }

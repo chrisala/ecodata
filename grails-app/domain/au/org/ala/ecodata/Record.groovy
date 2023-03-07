@@ -5,11 +5,15 @@ import static au.org.ala.ecodata.Status.ACTIVE
 import org.bson.types.ObjectId
 
 class Record {
+ //   def grailsApplication
 
     static mapping = {
         occurrenceID index: true
         outputSpeciesId index: true
         status index: true
+        activityId index: true
+        projectActivityId index: true
+        lastUpdated index: true
         version false
     }
 
@@ -34,6 +38,8 @@ class Record {
     String json
     Integer outputItemId
     String status = ACTIVE
+
+    static transients = ['recordNumber']
 
     def beforeValidate() {
         if (occurrenceID == null) {
@@ -60,5 +66,9 @@ class Record {
         outputItemId nullable: true
         status nullable: true
         outputSpeciesId nullable: true
+    }
+
+    String getRecordNumber(sightingsUrl){
+        "${sightingsUrl}/bioActivity/index/${activityId}"
     }
 }

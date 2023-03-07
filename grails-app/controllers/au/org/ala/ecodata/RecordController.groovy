@@ -18,7 +18,7 @@ import org.springframework.web.multipart.MultipartHttpServletRequest
  */
 class RecordController {
 
-    def grailsApplication
+  //  def grailsApplication
 
     RecordService recordService
     UserService userService
@@ -101,10 +101,10 @@ class RecordController {
                 error = "Invalid max parameter vaue"
             } else if (params.offset && !params.offset.isNumber()) {
                 error = "Invalid offset parameter vaue"
-            } else if (params.sort && params.sort != "asc" && params.sort != "desc") {
-                error = "Invalid sort parameter value (expected: asc, desc)"
-            } else if (params.order && params.order != "lastUpdated") {
-                error = "Invalid order parameter value (expected: lastUpdated)"
+            } else if (params.order && params.order != "asc" && params.order != "desc") {
+                error = "Invalid order parameter value (expected: asc, desc)"
+            } else if (params.sort && params.sort != "lastUpdated") {
+                error = "Invalid sort parameter value (expected: lastUpdated)"
             } else if (params.status && params.status != "active" && params.status != "deleted") {
                 error = "Invalid status parameter value (expected: active or deleted)"
             } else if(params.id){
@@ -136,16 +136,17 @@ class RecordController {
                 result = recordService.listByProjectId(args, lastUpdated, restrictedProjectActivities)
                 result?.list?.each {
                     it.projectName = project?.name
+                    it.license = recordService.getLicense(it)
                 }
             } else {
                 response.status = HttpStatus.SC_BAD_REQUEST
-                log.error(error)
+                log.error(error.toString())
                 result = [status: 'error', error: error]
             }
 
         } catch (Exception ex) {
             response.status = HttpStatus.SC_INTERNAL_SERVER_ERROR
-            log.error(ex)
+            log.error(ex.toString())
             result << [status: 'error', error: "Unexpected error."]
         }
 
@@ -492,7 +493,7 @@ class RecordController {
                 }
 
             } catch (Exception e) {
-                log.error(e, e)
+                log.error(e.getMessage(), e)
                 response.setStatus(SC_INTERNAL_SERVER_ERROR)
                 response.setContentType("application/json")
                 [success: false]
@@ -555,8 +556,8 @@ class RecordController {
     }
 
     private def setResponseHeadersForRecord(response, record) {
-        response.addHeader("content-location", grailsApplication.config.grails.serverURL + "/record/" + record.occurrenceID)
-        response.addHeader("location", grailsApplication.config.grails.serverURL + "/record/" + record.occurrenceID)
+        response.addHeader("content-location", grailsApplication.config.getProperty('grails.serverURL') + "/record/" + record.occurrenceID)
+        response.addHeader("location", grailsApplication.config.getProperty('grails.serverURL') + "/record/" + record.occurrenceID)
         response.addHeader("entityId", record.id.toString())
     }
 

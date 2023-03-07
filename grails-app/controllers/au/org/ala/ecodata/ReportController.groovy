@@ -1,7 +1,7 @@
 package au.org.ala.ecodata
 
 import grails.converters.JSON
-import org.codehaus.groovy.grails.web.json.JSONObject
+import org.grails.web.json.JSONObject
 
 
 class ReportController {
@@ -43,36 +43,44 @@ class ReportController {
         respond reportList
     }
 
+    /**
+     * Clears any data entered for this report.
+     * @param id the reportId of the report to clear.
+     * @return
+     */
+    @RequireApiKey
+    def reset(String id) {
+        respond reportingService.reset(id)
+    }
+
     @RequireApiKey
     def submit(String id) {
         Map params = request.JSON
-        if (params.comment == JSONObject.NULL) {
-            params.comment = null
-        }
-
         respond reportingService.submit(id, params.comment)
     }
 
     @RequireApiKey
     def approve(String id) {
         Map params = request.JSON
-        if (params.comment == JSONObject.NULL) {
-            params.comment = null
-        }
         respond reportingService.approve(id, params.comment)
     }
 
     @RequireApiKey
     def returnForRework(String id) {
         Map params = request.JSON
-        if (params.comment == JSONObject.NULL) {
-            params.comment = null
-        }
-        if (params.category == JSONObject.NULL) {
-            params.category = null
-        }
+        respond reportingService.returnForRework(id, params.comment, params.categories)
+    }
 
-        respond reportingService.returnForRework(id, params.comment, params.category)
+    @RequireApiKey
+    def cancel(String id) {
+        Map params = request.JSON
+        respond reportingService.cancel(id, params.comment, params.categories)
+    }
+
+    @RequireApiKey
+    def adjust(String id) {
+        Map params = request.JSON
+        respond reportingService.adjust(id, params.comment, params.adjustmentActivityType)
     }
 
     @RequireApiKey

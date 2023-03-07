@@ -4,19 +4,21 @@ import au.org.ala.ecodata.metadata.OutputMetadata
 import au.org.ala.ecodata.metadata.ProgramsModel
 import au.org.ala.ecodata.reporting.XlsExporter
 import grails.converters.JSON
+import grails.core.GrailsApplication
 import grails.validation.ValidationException
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import org.apache.poi.ss.util.CellReference
-import org.codehaus.groovy.grails.web.json.JSONException
-import org.codehaus.groovy.grails.web.json.JSONObject
-import org.grails.plugins.csv.CSVMapReader
+import org.grails.web.json.JSONArray
+//import org.grails.plugins.csv.CSVMapReader
+import grails.plugins.csv.CSVMapReader
 
 import java.text.SimpleDateFormat
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 
-import static au.org.ala.ecodata.Status.*
+import static au.org.ala.ecodata.Status.ACTIVE
+import static au.org.ala.ecodata.Status.DELETED
 
 class MetadataService {
 
@@ -25,13 +27,88 @@ class MetadataService {
 
     private static final int BATCH_LIMIT = 200
 
-    def grailsApplication, webService, cacheService, messageSource, excelImportService, emailService, userService, commonService
+    private static final List IGNORE_DATA_TYPES = ['lookupByDiscreteValues', 'lookupRange']
 
+    private static final String SERVICES_KEY = "services.config"
+    def webService, cacheService, messageSource, emailService, userService, commonService
+    SettingService settingService
+    GrailsApplication grailsApplication
+
+    /**
+     * @deprecated use versioned API to retrieve activity form definitions
+     */
     def activitiesModel() {
         return cacheService.get('activities-model',{
-            String filename = (grailsApplication.config.app.external.model.dir as String) + 'activities-model.json'
-            JSON.parse(new File(filename).text)
+            JSON.parse((buildActivityModel() as JSON).toString())
         })
+    }
+
+    /**
+     * Creates a model equivalent to the legacy activities-model.json for client API compatibility.
+     * @deprecated use versioned API to retrieve activity form definitions
+     */
+     private Map buildActivityModel() {
+        Map activitiesModel = [activities:[], outputs:[]]
+
+        // We are expecting the number of versions per form to be small for the life
+        // of this deprecated API  (in most cases 1) so are querying all forms and collecting only the
+        // maximum version rather than creating a more complex query (which isn't
+        // well supported by the current version of the mongo gorm plugin).
+        Map maxVersionsByName = [:]
+        Map activitiesByName = [:]
+
+        ActivityForm.findAllWhereStatusNotEqualAndPublicationStatusEquals(Status.DELETED, PublicationStatus.PUBLISHED).each { ActivityForm activityForm ->
+            Map activityModel = [
+                    name: activityForm.name,
+                    gmsId: activityForm.gmsId,
+                    category: activityForm.category,
+                    supportsSites: activityForm.supportsSites,
+                    supportsPhotoPoints: activityForm.supportsPhotoPoints,
+                    type: activityForm.type,
+                    minOptionalSectionsCompleted: activityForm.minOptionalSectionsCompleted,
+                    outputConfig: [],
+                    outputs: []
+            ]
+
+            activityForm.sections.each { FormSection section ->
+                activityModel.outputConfig << [
+                        outputName: section.name,
+                        optional: section.optional,
+                        collapsedByDefault: section.collapsedByDefault,
+                        optionalQuestionText: section.optionalQuestionText
+                ]
+
+                activityModel.outputs << [
+                        name: section.name,
+                        template: section.templateName,
+                        title: section.title,
+                        scores: [] // Unused
+                ]
+            }
+
+            if (!maxVersionsByName[activityForm.name] || (maxVersionsByName[activityForm.name] < activityForm.formVersion)) {
+                maxVersionsByName[activityForm.name] = activityForm.formVersion
+                activitiesByName[activityForm.name] = activityModel
+            }
+        }
+        // Assemble the latest version of each activity into the model.
+        activitiesByName.each { String name, Map activityModel ->
+            List outputs = activityModel.remove('outputs')
+            activityModel.outputs = outputs.collect{it.name}
+            activitiesModel.activities << activityModel
+            if (outputs) {
+                outputs.each { Map output ->
+                    if (!activitiesModel.outputs.find{it.name == output.name}) {
+                        activitiesModel.outputs << output
+                    }
+                }
+            }
+            else {
+                log.warn("No outputs for ${activityModel.name}")
+            }
+        }
+
+        activitiesModel
     }
 
     /**
@@ -64,14 +141,14 @@ class MetadataService {
                 byCategory[category] = []
             }
             def description = messageSource.getMessage("api.${it.name}.description", null, "", Locale.default)
-            byCategory[category] << [name:it.name, description:description]
+            byCategory[category] << [name:it.name, type:it.type, description:description]
         }
         byCategory
     }
 
     def programsModel() {
         return cacheService.get('programs-model',{
-            String filename = (grailsApplication.config.app.external.model.dir as String) + 'programs-model.json'
+            String filename = grailsApplication.config.getProperty('app.external.model.dir') + 'programs-model.json'
             JSON.parse(new File(filename).text)
         })
     }
@@ -93,11 +170,28 @@ class MetadataService {
         return activitiesModel().outputs.find({it.name == outputName})?.template
     }
 
+
+    /**
+     * Searches through ActivityForms for a template that matches the supplied name.  The latest version of the form
+     * will be used.
+     * Used for backwards compatibility with the old API
+     * @param templateName the template to search for.
+     * @deprecated use templates associated with the ActivityForm directly.
+     */
     def getOutputDataModel(templateName) {
-        return cacheService.get(templateName + '-model',{
-            String filename = (grailsApplication.config.app.external.model.dir as String) + templateName + '/dataModel.json'
-            JSON.parse(new File(filename).text)
-        })
+        List forms = ActivityForm.where {
+            status != Status.DELETED
+            publicationStatus == PublicationStatus.PUBLISHED
+            sections { templateName == templateName}
+        }.list()
+
+        ActivityForm form = forms.max{it.formVersion}
+        Map template = form?.sections?.find{it.templateName == templateName}?.template
+        if (!template) {
+            log.warn("No template found with name ${templateName}")
+        }
+
+        JSON.parse(((template ?: [:]) as JSON).toString())
     }
 
     def getOutputDataModelByName(name) {
@@ -113,13 +207,14 @@ class MetadataService {
         return null
     }
 
-    def updateOutputDataModel(model, templateName) {
-        log.debug "updating template name = ${templateName}"
-        writeWithBackup(model, grailsApplication.config.app.external.model.dir, templateName, 'dataModel', 'json')
-        // make sure it gets reloaded
-        cacheService.clear(templateName + '-model')
-        String bodyText = "The output data model ${model} has been edited by ${userService.currentUserDisplayName?: 'an unknown user'} on the ${grailsApplication.config.grails.serverURL} server"
-        emailService.emailSupport("Output model updated in ${grailsApplication.config.grails.serverURL}", bodyText)
+    Map getOutputNameAndDataModelForAnActivityName(name) {
+        def outputList = activitiesModel().activities.find { it.name == name }?.outputs
+        if (outputList && outputList.size() > 0) {
+            return activitiesModel().outputs.grep { it.name in outputList }?.collectEntries {
+                [(it.name): getOutputDataModel(it.template)]
+            }
+        }
+        return null
     }
 
     def getModelName(output, type) {
@@ -131,25 +226,10 @@ class MetadataService {
         return activitiesModel().find({it.name == type})?.template
     }
 
-    def getInstitutionName(uid) {
-        return uid ? institutionList().find({ it.uid == uid })?.name : ''
-    }
-
     def institutionList() {
         return cacheService.get('institutions',{
-            webService.getJson(grailsApplication.config.collectory.baseURL + 'ws/institution')
+            webService.getJson(grailsApplication.config.getProperty('collectory.baseURL') + 'ws/institution')
         })
-    }
-
-    /**
-     * Returns the institution from the institutionList() that matches the supplied
-     * name (using a case-insensitive match).
-     * @param name the name of the institution to find.
-     * @return the institution with the supplied name, or null if it cannot be found.
-     */
-    def findInstitutionByName(String name) {
-        def lowerCaseName = name.toLowerCase()
-        return institutionList().find{ it.name.toLowerCase() == lowerCaseName }
     }
 
     def writeWithBackup(content, modelPathRoot, path, filename, extension) {
@@ -178,20 +258,12 @@ class MetadataService {
         }
     }
 
-    def updateActivitiesModel(model) {
-        writeWithBackup(model, grailsApplication.config.app.external.model.dir, '', 'activities-model', 'json')
-        // make sure it gets reloaded
-        cacheService.clear('activities-model')
-        String bodyText = "The activities-model has been edited by ${userService.currentUserDisplayName?: 'an unknown user'} on the ${grailsApplication.config.grails.serverURL} server"
-        emailService.emailSupport("Activities model updated in ${grailsApplication.config.grails.serverURL}", bodyText)
-    }
-
     def updateProgramsModel(model) {
-        writeWithBackup(model, grailsApplication.config.app.external.model.dir, '', 'programs-model', 'json')
+        writeWithBackup(model, grailsApplication.config.getProperty('app.external.model.dir'), '', 'programs-model', 'json')
         // make sure it gets reloaded
         cacheService.clear('programs-model')
-        String bodyText = "The programs-model has been edited by ${userService.currentUserDisplayName?: 'an unknown user'} on the ${grailsApplication.config.grails.serverURL} server"
-        emailService.emailSupport("Program model updated in ${grailsApplication.config.grails.serverURL}", bodyText)
+        String bodyText = "The programs-model has been edited by ${userService.currentUserDisplayName?: 'an unknown user'} on the ${grailsApplication.config.getProperty('grails.serverURL')} server"
+        emailService.emailSupport("Program model updated in ${grailsApplication.config.getProperty('grails.serverURL')}", bodyText)
     }
 
     // Return the Nvis classes for the supplied location. This is an interim solution until the spatial portal can be fixed to handle
@@ -199,7 +271,7 @@ class MetadataService {
     def getNvisClassesForPoint(Double lat, Double lon) {
         def retMap = [:]
 
-        def nvisLayers = grailsApplication.config.app.facets.geographic.special
+        Map nvisLayers = grailsApplication.config.getProperty('app.facets.geographic.special', Map)
 
         nvisLayers.each { name, path ->
             def classesJsonFile = new File(path + '.json')
@@ -268,10 +340,15 @@ class MetadataService {
     def getLocationMetadataForPoint(lat, lng) {
 
         def features = performLayerIntersect(lat, lng)
+        def localityValue = ''
+        if(grailsApplication.config.getProperty('google.api.key')) {
+            def localityUrl = grailsApplication.config.getProperty('google.geocode.url') + "${lat},${lng}&key=${grailsApplication.config.getProperty('google.api.key')}"
+            def result = webService.getJson(localityUrl)
+            localityValue = (result?.results && result.results)?result.results[0].formatted_address:''
+        }
+        else
+            log.warn ('Config google.api.key is missing. Cannot access Google services without api key.')
 
-        def localityUrl = grailsApplication.config.google.geocode.url + "${lat},${lng}"
-        def result = webService.getJson(localityUrl)
-        def localityValue = (result?.results && result.results)?result.results[0].formatted_address:''
         features << [locality: localityValue]
 
         // Return the Nvis classes for the supplied location. This is an interim solution until the spatial portal can be fixed to handle
@@ -290,8 +367,8 @@ class MetadataService {
     def performLayerIntersect(lat,lng) {
 
 
-        def contextualLayers = grailsApplication.config.app.facets.geographic.contextual
-        def groupedFacets = grailsApplication.config.app.facets.geographic.grouped
+        Map contextualLayers = grailsApplication.config.getProperty('app.facets.geographic.contextual', Map)
+        Map groupedFacets = grailsApplication.config.getProperty('app.facets.geographic.grouped', Map)
 
         // Extract all of the layer field ids from the facet configuration so we can make a single web service call to the spatial portal.
         def fieldIds = contextualLayers.collect { k, v -> v }
@@ -300,7 +377,7 @@ class MetadataService {
         }
 
         // Do the intersect
-        def featuresUrl = grailsApplication.config.spatial.intersectUrl + "${fieldIds.join(',')}/${lat}/${lng}"
+        def featuresUrl = grailsApplication.config.getProperty('spatial.intersectUrl') + "${fieldIds.join(',')}/${lat}/${lng}"
         def features = webService.getJson(featuresUrl)
 
         def facetTerms = [:]
@@ -360,8 +437,8 @@ class MetadataService {
 
     /** Returns a list of spatial portal layer/field ids that ecodata will intersect every site against to support facetted geographic searches */
     List<String> getSpatialLayerIdsToIntersect() {
-        def contextualLayers = grailsApplication.config.app.facets.geographic.contextual
-        def groupedFacets = grailsApplication.config.app.facets.geographic.grouped
+        Map contextualLayers = grailsApplication.config.getProperty('app.facets.geographic.contextual', Map)
+        Map groupedFacets = grailsApplication.config.getProperty('app.facets.geographic.grouped', Map)
         def fieldIds = contextualLayers.collect { k, v -> v }
         groupedFacets.each { k, v ->
             fieldIds.addAll(v.collect { k1, v1 -> v1 })
@@ -375,7 +452,7 @@ class MetadataService {
      * @param fid the field id.
      */
     Map getGeographicFacetConfig(String fid) {
-        Map config = grailsApplication.config.app.facets.geographic
+        Map config = grailsApplication.config.getProperty('app.facets.geographic', Map)
         Map facetConfig = null
         config.contextual.each { String groupName, String groupFid ->
             if (fid == groupFid) {
@@ -416,7 +493,7 @@ class MetadataService {
         for(int i = 0; i < pointsArray?.size(); i++) {
             log.info("${(i+1)}/${pointsArray.size()} batch process started..")
 
-            def featuresUrl = grailsApplication.config.spatial.intersectBatchUrl + "?fids=${fieldIds.join(',')}&points=${pointsArray[i]}"
+            def featuresUrl = grailsApplication.config.getProperty('spatial.intersectBatchUrl') + "?fids=${fieldIds.join(',')}&points=${pointsArray[i]}"
             def status = webService.getJsonRepeat(featuresUrl)
             if(status?.error){
                 throw new Exception("Webservice error, failed to get JSON after 12 tries.. - ${status}")
@@ -485,8 +562,8 @@ class MetadataService {
             log.error("Missing result for ${lat}, ${lng}")
         }
 
-        def contextualLayers = grailsApplication.config.app.facets.geographic.contextual
-        def groupedFacets = grailsApplication.config.app.facets.geographic.grouped
+        Map contextualLayers = grailsApplication.config.getProperty('app.facets.geographic.contextual', Map)
+        Map groupedFacets = grailsApplication.config.getProperty('app.facets.geographic.grouped', Map)
         def facetTerms = [:]
 
         contextualLayers.each { name, fid ->
@@ -538,9 +615,16 @@ class MetadataService {
 
             def features = [:]
             if (includeLocality) {
-                def localityUrl = grailsApplication.config.google.geocode.url + "${lat},${lng}"
-                def result = webService.getJson(localityUrl)
-                def localityValue = (result?.results && result.results) ? result.results[0].formatted_address : ''
+                def localityValue = ''
+                if(grailsApplication.config.getProperty('google.api.key')) {
+                    def localityUrl = grailsApplication.config.getProperty('google.geocode.url') + "${lat},${lng}&key=${grailsApplication.config.getProperty('google.api.key')}"
+                    def result = webService.getJson(localityUrl)
+                    localityValue = (result?.results && result.results) ? result.results[0].formatted_address : ''
+                }
+                else {
+                    log.warn ('Config google.api.key is missing. Cannot access Google services without api key.')
+                }
+
                 features << [locality: localityValue]
             }
             features << getNvisClassesForPoint(lat as Double, lng as Double)
@@ -586,10 +670,10 @@ class MetadataService {
                 columnMap:columnMap
         ]
         Workbook workbook = WorkbookFactory.create(excelWorkbookIn)
-
-        excelImportService.convertColumnMapConfigManyRows(workbook, config)
-
+        excelImportService.mapSheet(workbook, config)
     }
+
+
 
     /**
      * Converts a Score domain object to a Map.
@@ -599,21 +683,8 @@ class MetadataService {
      *
      */
     Map toMap(Score score, List views) {
-        Map scoreMap = [
-                scoreId:score.scoreId,
-                category:score.category,
-                outputType:score.outputType,
-                isOutputTarget:score.isOutputTarget,
-                label:score.label,
-                description:score.description,
-                displayType:score.displayType,
-                entity:score.entity,
-                externalId:score.externalId,
-                entityTypes:score.entityTypes]
-        if (views?.contains("config")) {
-            scoreMap.configuration = score.configuration
-        }
-        scoreMap
+        boolean includeConfig = views?.contains("config")
+        score.toMap(includeConfig)
     }
 
     Score createScore(Map properties) {
@@ -655,4 +726,305 @@ class MetadataService {
             return [status: 'error', errors: ['No such id']]
         }
     }
+
+    /**
+     * Get a unique list of data types used by all models.
+     * @return
+     */
+    List getUniqueDataTypes(){
+        Set dataTypes = new HashSet()
+        withAllActivityFormTemplates { Map template ->
+            template.dataModel.each{
+                dataTypes.add(it.dataType)
+            }
+        }
+
+        dataTypes.asList()
+    }
+
+    /**
+     * Find custom indices used by data models.
+     * @return
+     */
+    Map getIndicesForDataModels(){
+        cacheService.get('indices-for-data-models', {
+            Map indices = [:].withDefault { [] }
+            withAllActivityFormTemplates { Map template ->
+                Map tempIndices = getIndicesForDataModel(template)
+                tempIndices.each { key, value->
+                    indices[key].addAll(value)
+                }
+            }
+            indices
+        })
+    }
+
+    /**
+     * Remove indices added from template name.
+     * @return
+     */
+    Map getIndicesForDataModelsMinusIndicesForTemplate(String templateName, Map indices){
+        indices?.each { String indexName, List dataTypeDetails ->
+            List removeDataTypeDetails = dataTypeDetails?.grep {
+                it.modelName == templateName
+            }
+
+            dataTypeDetails.removeAll(removeDataTypeDetails)
+        }
+
+        indices
+    }
+
+    /**
+     * Find custom indices used in a data model.
+     * @return
+     */
+    Map getIndicesForDataModel(Map model){
+        Map indices = [:].withDefault { [] }
+        model?.dataModel?.each { metadata ->
+            if(IGNORE_DATA_TYPES.contains(metadata.dataType))
+                return
+
+            switch (metadata.dataType){
+                case 'list':
+                    metadata?.columns?.each { column ->
+                        if(column.indexName){
+                            indices[column.indexName].add([
+                                    modelName: model.modelName, indexName: column.indexName, dataType: column.dataType,
+                                    path: ["data", metadata.name, column.name]
+                            ])
+                        }
+                    }
+                    break;
+                case 'matrix':
+                    metadata?.rows?.each { row ->
+                        if(row.indexName){
+                            indices[row.indexName].add([
+                                    modelName: model.modelName, indexName: row.indexName, dataType: row.dataType,
+                                    path: ["data", metadata.name, row.name]
+                            ])
+                        }
+                    }
+                    break
+                default:
+                    if(metadata.indexName){
+                        indices[metadata.indexName].add([
+                            modelName: model.modelName, indexName: metadata.indexName, dataType: metadata.dataType,
+                            path: ["data",metadata.name]
+                        ])
+                    }
+            }
+        }
+
+        indices
+    }
+
+    /**
+     * An index is valid if
+     * 1. all fields using this index has the same data type
+     * @param fields
+     * @return
+     */
+    boolean isIndexValid(List fields){
+        List dataTypes = fields?.collect { it.dataType }
+        dataTypes = dataTypes?.unique()
+        if(dataTypes?.size() > 1){
+            return false
+        }
+
+        true
+    }
+
+    /**
+     * Checks if user added indices to the passed data model is valid.
+     * Conditions to be met by a valid data model
+     * 1. Data type of an index must be the same in all data models using that index i.e. if an index 'individualCount'
+     * of data type 'number' is added to passed data model, then ensure 'individualCount' used in other models also is
+     * of type 'number'. Otherwise, the document is invalid.
+     */
+    Map isDataModelValid(Map model){
+        Map modelIndices = getIndicesForDataModel(model)
+        Map allIndices = getIndicesForDataModels()
+        allIndices = getIndicesForDataModelsMinusIndicesForTemplate(model.modelName, allIndices)
+        boolean valid = true;
+        List errorInIndex = []
+        if(modelIndices){
+            modelIndices.each { String indexName,  List details ->
+                List dataType = details?.collect { it.dataType }
+                List existingDataTypes = allIndices?.get(indexName)?.collect { it.dataType }
+                List defaultDataTypes = grailsApplication.config.getProperty('facets.data', List)?.grep { it.name == indexName }?.collect { it.dataType }
+                List allDataTypes = []
+                if(dataType){
+                    allDataTypes.addAll(dataType)
+                }
+
+                if(existingDataTypes){
+                    allDataTypes.addAll(existingDataTypes)
+                }
+
+                if(defaultDataTypes){
+                    allDataTypes.addAll(defaultDataTypes)
+                }
+
+                if(allDataTypes.unique().size() > 1){
+                    valid = false
+                    errorInIndex.add(indexName)
+                }
+            }
+        }
+
+        [valid : valid, errorInIndex: errorInIndex]
+    }
+
+    /**
+     * Retrieves all undeleted ActivityForms in batches, passing each ActivityForm to the supplied closure for processing.
+     * @param action a Closure that takes a single argument of type ActivityForm
+     */
+    private void withAllActivityForms(Closure action) {
+        int batchSize = 100
+        int offset = 0
+
+        int count = ActivityForm.countByStatusNotEqual(Status.DELETED)
+
+        while (count > offset) {
+            List activities = ActivityForm.findAllByStatusNotEqual(Status.DELETED, [offset:offset, max:batchSize, sort:'id'])
+            activities.each { ActivityForm activityForm ->
+                action(activityForm)
+            }
+
+            offset += batchSize
+        }
+    }
+
+    /**
+     * A convenience method for ActivityForm template processing.
+     * Retrieves all undeleted ActivityForms in batches, passing each template of each form to the supplied closure for processing.
+     * @param action a Closure that takes a single argument of type Map which will contain the template from a form section
+     */
+    private void withAllActivityFormTemplates(Closure action) {
+
+        withAllActivityForms { ActivityForm activityForm ->
+            activityForm.sections?.each { FormSection section ->
+                action(section.template)
+            }
+        }
+    }
+
+    /**
+     * Get services of project from configuration file
+     * services.json should be identical with fieldcapture
+     * @return
+     */
+    List<Service> getServiceList() {
+
+        List services = Service.findAllByStatusNotEqual(Status.DELETED)
+
+        Map scoresByFormSection = [:].withDefault { String formSectionName ->
+            Score.createCriteria().list {
+                or {
+                    eq('configuration.filter.filterValue', formSectionName)
+                    eq('configuration.childAggregations.filter.filterValue', formSectionName)
+                }
+            }
+        }
+        services.each { service ->
+            service.outputs?.each { ServiceForm serviceFormConfig ->
+
+                List scores = scoresByFormSection[serviceFormConfig.sectionName]
+                serviceFormConfig.relatedScores = scores
+            }
+        }
+        services
+    }
+
+    /**
+     * Returns a the List of services being delivered by this project with target information for each score.
+     * @param  project
+     * @return a data structure similar to:
+     * [
+     *    name:<service name>,
+     *    id:<service id>,
+     *    scores:[
+     *         [
+     *             scoreId:<id>,
+     *             label:<score description>,
+     *             isOutputTarget: <true/false>,
+     *             target:<target defined for this score in the MERI plan, may be null>
+     *             periodTargets: [
+     *                 [
+     *                     period:<string of form year1/year2, eg. 2017/2018, as it appears in the MERI plan>,
+     *                     target:<minimum target for this score during the period>
+     *                 ]
+     *             ]
+     *         ]
+     *    ]
+     * ]
+     *
+     */
+
+    List<Map> getProjectServicesWithTargets(project){
+        List<Service> services = getServiceList()
+        List serviceIds = project.custom?.details?.serviceIds?.collect{it as Integer}
+        List projectServices = services?.findAll {it.legacyId in serviceIds }
+        List targets = project.outputTargets
+
+        // Make a copy of the services as we are going to augment them with target information.
+        List results = projectServices.collect { service ->
+            [
+                    name:service.name,
+                    id: service.id,
+                    scores: service.scores()?.collect { score ->
+                        [scoreId: score.scoreId, label: score.label, isOutputTarget:score.isOutputTarget]
+                    }
+            ]
+        }
+        results.each { service ->
+            service.scores?.each  { score ->
+                Map target = targets.find {it.scoreId == score.scoreId}
+                if (target){
+                    score.target = target?.target
+                    score.periodTargets = target?.periodTargets
+                    score.targetDate = target?.targetDate
+                }else
+                    score.delete = true //prepare for delete
+            }
+
+            service.scores?.removeAll {
+                it.delete
+            }
+        }
+
+        return results
+    }
+
+    /** Returns a value from the gradle git plugin generated git.properties */
+    String getGitProperty(String propertyName) {
+        getFromPropertyFile("git.properties", propertyName)
+    }
+
+    /** Returns a value from the gradle/spring boot generated build-info.properties */
+    String getBuildProperty(String propertyName) {
+        getFromPropertyFile("META-INF/build-info.properties", propertyName)
+    }
+    /**
+     * Loads the properties file with the supplied name from the classpath,
+     * then returns the value associated with the supplied name.
+     */
+    private String getFromPropertyFile(String fileName, String propertyName) {
+        cacheService.get(fileName+'.'+propertyName, {
+            String value = ''
+            def classLoader = Thread.currentThread().getContextClassLoader()
+            URL gitProperties = classLoader.getResource(fileName)
+            gitProperties?.withInputStream {
+                Properties props = new Properties()
+                props.load(it)
+                value = props.get(propertyName)
+            }
+            value
+        })
+
+    }
+
+
+
 }

@@ -1,4 +1,5 @@
 package au.org.ala.ecodata
+
 import au.org.ala.ecodata.converter.RecordConverter
 import au.org.ala.ecodata.metadata.OutputMetadata
 
@@ -13,6 +14,7 @@ class OutputService {
     MetadataService metadataService
     RecordService recordService
     UserService userService
+    CommonService commonService
     DocumentService documentService
     CommentService commentService
     ActivityService activityService
@@ -20,9 +22,9 @@ class OutputService {
     static final ACTIVE = "active"
     static final SCORES = 'scores'
 
-    def getCommonService() {
+  /*  def getCommonService() {
         grailsApplication.mainContext.commonService
-    }
+    }*/
 
     def get(id, levelOfDetail = ['all']) {
         def o = Output.findByOutputId(id)
@@ -37,14 +39,14 @@ class OutputService {
         if (version) {
             def sourceOutputs = Output.findAllByActivityId(id).collect { it.outputId }
             def all = AuditMessage.findAllByEntityIdInListAndEntityTypeAndDateLessThanEquals(sourceOutputs, Output.class.name,
-                    new Date(version as Long), [sort:'date', order:'desc'])
+                    new Date(version as Long), [sort: 'date', order: 'desc'])
             def outputs = []
             def found = []
             all?.each {
                 if (!found.contains(it.entityId)) {
                     found << it.entityId
                     if (it.entity.activityId == id && it.entity.status == ACTIVE &&
-                        (it.eventType == AuditEventType.Insert || it.eventType == AuditEventType.Update)) {
+                            (it.eventType == AuditEventType.Insert || it.eventType == AuditEventType.Update)) {
                         outputs << toMap(it.entity, levelOfDetail)
                     }
                 }
@@ -105,7 +107,7 @@ class OutputService {
      * @return map of properties
      */
     def toMap(output, levelOfDetail = []) {
-        def mapOfProperties = output instanceof Output ?  output.getProperty("dbo").toMap() : output
+        def mapOfProperties = output instanceof Output ?  GormMongoUtil.extractDboProperties(output.getProperty("dbo")) : output
         def id = mapOfProperties["_id"].toString()
         mapOfProperties["id"] = id
         mapOfProperties.remove("_id")
@@ -115,6 +117,7 @@ class OutputService {
             mapOfProperties.remove 'data'
         }
         mapOfProperties.findAll { k, v -> v != null }
+        //GormMongoUtil.deepPrune(mapOfProperties)
     }
 
     /**
@@ -141,7 +144,7 @@ class OutputService {
     }
 
     def create(Map props) {
-        assert getCommonService()
+     //   assert getCommonService()
         Activity activity = Activity.findByActivityId(props.activityId)
         if (activity) {
             Output output = new Output(activityId: activity.activityId, outputId: Identifiers.getNew(true, ''))
@@ -154,7 +157,7 @@ class OutputService {
 
 
                 createOrUpdateRecordsForOutput(activity, output, props)
-                getCommonService().updateProperties(output, props)
+                commonService.updateProperties(output, props)
 
                 return [status: 'ok', outputId: output.outputId]
             } catch (Exception e) {
@@ -179,38 +182,49 @@ class OutputService {
      * @param output
      * @param props
      */
-    void createOrUpdateRecordsForOutput(Activity activity, Output output, Map props) {
+    def createOrUpdateRecordsForOutput(Activity activity, Output output, Map props, boolean doNotAlert = false) {
         Map outputMetadata = metadataService.getOutputDataModelByName(props.name) as Map
 
         boolean createRecord = outputMetadata && outputMetadata["record"]?.toBoolean()
-
+        int totalRecords = 0
         if (createRecord) {
             Project project = Project.findByProjectId(activity.projectId)
             Site site = activity.siteId ? Site.findBySiteId(activity.siteId) : null
             ProjectActivity projectActivity = ProjectActivity.findByProjectActivityId(activity.projectActivityId)
-
-            List<Map> records = RecordConverter.convertRecords(project, site, projectActivity, activity, output, props.data, outputMetadata)
+            Organisation organisation = project?.organisationName ? Organisation.findByName(project?.organisationName) : null
+            List<Map> records = RecordConverter.convertRecords(project, organisation, site, projectActivity, activity, output, props.data, outputMetadata)
 
             records.each { record ->
-                //Create or update record?
-                Record existingRecord = Record.findByOutputSpeciesId(record.outputSpeciesId)
-                if (existingRecord) {
-                    existingRecord.status = Status.ACTIVE
-                    try {
-                        recordService.updateRecord(existingRecord, record)
-                    } catch (e) { // Never hide an exception, chain it instead
-                        //No need to log here if it is chained, the catcher should do the right thing
-                        throw new IllegalArgumentException("Failed to update record: ${record},\n Original Error: ${e.message}", e)
-                    }
+                boolean excludeAbsenceRecord = outputMetadata && outputMetadata["excludeAbsenceRecord"]?.toBoolean()
+                if (excludeAbsenceRecord && (!record.individualCount || record.individualCount?.toInteger() == 0)) {
+                    // Scenario: Species absence + No individualCount = Exclude record generation.
+                    // Do nothing.
                 } else {
-                    try {
-                        recordService.createRecord(record)
-                    } catch (e) {
-                        throw new IllegalArgumentException("Failed to create record: ${record},\n Original Error: ${e.message}", e)
+                    //Create or update record?
+                    Record existingRecord = Record.findByOutputSpeciesId(record.outputSpeciesId)
+                    if (existingRecord) {
+                        existingRecord.status = Status.ACTIVE
+                        try {
+                            recordService.updateRecord(existingRecord, record, [:], doNotAlert)
+                            totalRecords++
+                        } catch (e) { // Never hide an exception, chain it instead
+                            //No need to log here if it is chained, the catcher should do the right thing
+                            throw new IllegalArgumentException("Failed to update record: ${record},\n Original Error: ${e.message}", e)
+                        }
+                    } else {
+                        try {
+                            recordService.createRecord(record, doNotAlert)
+                            totalRecords++
+                        } catch (e) {
+                            throw new IllegalArgumentException("Failed to create record: ${record},\n Original Error: ${e.message}", e)
+                        }
                     }
                 }
+
             }
         }
+
+        totalRecords
     }
 
     def update(Map props, String outputId) {
@@ -223,12 +237,12 @@ class OutputService {
                 props.data = saveImages(props.data, props.name, output.outputId, activity.activityId)
                 props.data = saveAudio(props.data, props.name, output.outputId, activity.activityId)
 
-                getCommonService().updateProperties(output, props)
+                commonService.updateProperties(output, props)
 
                 List statusUpdate = recordService.updateRecordStatusByOutput(outputId, Status.DELETED)
                 if (!statusUpdate) {
                     createOrUpdateRecordsForOutput(activity, output, props)
-                    getCommonService().updateProperties(output, props)
+                    commonService.updateProperties(output, props)
                     result = [status: 'ok']
                 } else {
                     result = [status: 'error', error: "Error updating the record status"]
@@ -265,10 +279,10 @@ class OutputService {
      * @param activityId
      * @return
      */
-    List listAllForActivityId(String activityId){
-       Output.findAllByActivityIdAndStatus(activityId, ACTIVE)?.collect{
-           toMap(it)
-       }
+    List listAllForActivityId(String activityId) {
+        Output.findAllByActivityIdAndStatus(activityId, ACTIVE)?.collect {
+            toMap(it)
+        }
     }
 
     /**
@@ -298,7 +312,7 @@ class OutputService {
         OutputMetadata dataModel
         List remove
 
-        if(!context){
+        if (!context) {
             outputMetadata = metadataService.getOutputDataModelByName(metadataName) as Map
             dataModel = new OutputMetadata(outputMetadata);
             names = dataModel.getNamesForDataType(dataTypeName, null);
@@ -308,7 +322,7 @@ class OutputService {
 
         if (activityId && output?.size() > 0) {
             names?.each { name, node ->
-                if(node instanceof Boolean){
+                if (node instanceof Boolean) {
                     remove = []
                     output[name]?.each {
                         // save image if document id not found
@@ -319,12 +333,20 @@ class OutputService {
                             it.role = role
                             it.type = type
                             // record creation requires images to have an 'identifier' attribute containing the url for the image
-                            it.identifier = it.url
+                            try {
+                                it.identifier = it.url
+                                biocollect = new URL(it.url)
+                                stream = biocollect.openStream()
+                                Map document = documentService.create(it, stream)
+                                it.documentId = document.documentId
+                                // remove reference to biocollect staging area
+                                it.identifier = document.url
+                                documentService.update([identifier: document.url], it.documentId)
+                            } catch (MalformedURLException urlException){
+                                def error = [error: "URL invalid/${urlException.getMessage()}"]
+                                log.error error.toString()
+                            }
 
-                            biocollect = new URL(it.url)
-                            stream = biocollect.openStream()
-                            Map document = documentService.create(it, stream)
-                            it.documentId = document.documentId
                         } else {
                             documentService.update(it, it.documentId);
                             // if deleted remove the document
@@ -338,14 +360,14 @@ class OutputService {
                 }
 
                 // recursive check for image data
-                if(node instanceof Map){
-                    if(output[name] instanceof Map){
+                if (node instanceof Map) {
+                    if (output[name] instanceof Map) {
                         output[name] = saveMultimedia(output[name], metadataName, outputId, activityId, dataTypeName, role, type, node)
                     }
 
-                    if(output[name] instanceof  List){
-                        output[name].eachWithIndex{ column, index ->
-                            output[name][index] = saveMultimedia(column, metadataName, outputId, activityId, dataTypeName, role, type,  node)
+                    if (output[name] instanceof List) {
+                        output[name].eachWithIndex { column, index ->
+                            output[name][index] = saveMultimedia(column, metadataName, outputId, activityId, dataTypeName, role, type, node)
                         }
                     }
                 }
@@ -354,7 +376,6 @@ class OutputService {
 
         output
     }
-
 
     /**
      * @param criteria a Map of property name / value pairs.  Values may be primitive types or arrays.
@@ -388,5 +409,27 @@ class OutputService {
         } else {
             return []
         }
+    }
+
+    Map list(Map params = [arrange: [sort: 'id', order: 'desc']]) {
+        params = params.clone()
+        Map query = params.remove('query')
+        Map arrange = params.remove('arrange')
+        List outputs = Output.createCriteria().list () {
+            query?.each { prop, value ->
+                if (value instanceof List) {
+                    inList(prop, value)
+                }
+                else {
+                    eq(prop, value)
+                }
+            }
+
+            if (arrange) {
+                order(arrange.sort, arrange.order)
+            }
+        }
+
+        [total: outputs.totalCount, list: outputs]
     }
 }
