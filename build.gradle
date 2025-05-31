@@ -112,7 +112,7 @@ dependencies {
 
     implementation 'org.apache.poi:poi:5.2.2'
     implementation 'org.apache.poi:poi-ooxml:5.2.2'
-    implementation 'org.codehaus.groovy:groovy-dateutil:3.0.8'
+    implementation 'org.codehaus.groovy:groovy-dateutil:3.0.25'
 
     implementation "org.grails.plugins:ala-auth:5.2.0-SNAPSHOT"
     implementation "org.grails.plugins:ala-ws-security-plugin:4.1.1"
