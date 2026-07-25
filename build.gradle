@@ -128,7 +128,7 @@ dependencies {
 
     implementation 'org.grails.plugins:excel-export:2.1'
     implementation "org.locationtech.jts:jts-core:${jtsVersion}"
-    implementation "com.itextpdf:itextpdf:5.5.1"
+    implementation "com.itextpdf:itextpdf:5.5.13.6"
     implementation "org.apache.httpcomponents:httpmime:4.2.1"
     implementation 'org.grails.plugins:csv:1.0.1'
     implementation "org.geotools.xsd:gt-xsd-kml:${geoToolsVersion}"
